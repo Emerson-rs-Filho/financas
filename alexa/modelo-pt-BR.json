@@ -1,0 +1,91 @@
+{
+  "interactionModel": {
+    "languageModel": {
+      "invocationName": "nossa casa",
+      "intents": [
+        { "name": "AMAZON.CancelIntent", "samples": [] },
+        { "name": "AMAZON.HelpIntent", "samples": [] },
+        { "name": "AMAZON.StopIntent", "samples": [] },
+        { "name": "AMAZON.NavigateHomeIntent", "samples": [] },
+        { "name": "AMAZON.FallbackIntent", "samples": [] },
+        {
+          "name": "AdicionarIntent",
+          "slots": [{ "name": "item", "type": "AMAZON.SearchQuery", "samples": ["{item}"] }],
+          "samples": [
+            "adicionar {item}", "adiciona {item}", "adicione {item}",
+            "para adicionar {item}", "pra adicionar {item}",
+            "adicionar {item} na lista", "adiciona {item} na lista", "adicione {item} na lista",
+            "colocar {item}", "coloca {item}", "coloque {item}",
+            "para colocar {item}", "pra colocar {item}",
+            "colocar {item} na lista", "coloca {item} na lista", "coloque {item} na lista",
+            "põe {item}", "põe {item} na lista", "bota {item}", "bota {item} na lista",
+            "incluir {item}", "inclui {item}", "inclua {item}",
+            "acabou o {item}", "acabou a {item}", "acabou {item}", "está faltando {item}", "falta {item}",
+            "adicionar", "adiciona", "colocar uma coisa na lista"
+          ]
+        },
+        {
+          "name": "LerListaIntent",
+          "slots": [],
+          "samples": [
+            "o que tem na lista", "o que tem na lista de compras", "o que tem para comprar",
+            "o que falta comprar", "o que precisa comprar", "o que eu preciso comprar",
+            "ler a lista", "lê a lista", "leia a lista", "ler a lista de compras", "leia a lista de compras",
+            "quais são os itens", "quais itens tem na lista"
+          ]
+        },
+        {
+          "name": "CompreiIntent",
+          "slots": [{ "name": "item", "type": "AMAZON.SearchQuery", "samples": ["{item}"] }],
+          "samples": [
+            "já comprei {item}", "comprei {item}", "que já comprei {item}", "que comprei {item}",
+            "tira {item}", "tirar {item}", "tire {item}", "tira {item} da lista", "tirar {item} da lista",
+            "remove {item}", "remover {item}", "remova {item}",
+            "risca {item}", "riscar {item}", "marca {item} como comprado", "marcar {item} como comprado"
+          ]
+        }
+      ],
+      "types": []
+    },
+    "dialog": {
+      "intents": [
+        {
+          "name": "AdicionarIntent",
+          "delegationStrategy": "ALWAYS",
+          "confirmationRequired": false,
+          "prompts": {},
+          "slots": [{
+            "name": "item", "type": "AMAZON.SearchQuery",
+            "elicitationRequired": true, "confirmationRequired": false,
+            "prompts": { "elicitation": "Elicit.Slot.Adicionar.item" }
+          }]
+        },
+        {
+          "name": "CompreiIntent",
+          "delegationStrategy": "ALWAYS",
+          "confirmationRequired": false,
+          "prompts": {},
+          "slots": [{
+            "name": "item", "type": "AMAZON.SearchQuery",
+            "elicitationRequired": true, "confirmationRequired": false,
+            "prompts": { "elicitation": "Elicit.Slot.Comprei.item" }
+          }]
+        }
+      ],
+      "delegationStrategy": "ALWAYS"
+    },
+    "prompts": [
+      {
+        "id": "Elicit.Slot.Adicionar.item",
+        "variations": [
+          { "type": "PlainText", "value": "O que eu adiciono?" },
+          { "type": "PlainText", "value": "O que eu coloco na lista?" }
+        ]
+      },
+      {
+        "id": "Elicit.Slot.Comprei.item",
+        "variations": [{ "type": "PlainText", "value": "O que você comprou?" }]
+      }
+    ]
+  }
+}

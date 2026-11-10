@@ -1,0 +1,42 @@
+// Utilitários de tela compartilhados por todos os módulos.
+import { NOME_CASA } from './config.js';
+
+export const modal = document.getElementById('modal');
+modal.addEventListener('close', () => modal.classList.remove('wide'));
+
+export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+export const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+export const sinal = (v) => (v >= 0 ? '+' : '−');
+export const PAL = ['var(--lime)', '#8E8EF5', '#F5A35C', '#5EC8C8', '#E98AB8', '#B0B07A', '#9A9AA0'];
+export const brand = () => `${esc(NOME_CASA)}<span>.</span>`;
+
+// Ícones de traço (24×24). Novos módulos podem adicionar os seus aqui.
+export const IC = {
+  inicio: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
+  voltar: 'M15 5l-7 7 7 7',
+  seta: 'M5 12h14M13 6l6 6-6 6',
+  financas: 'M3 7h18v13H3zM3 7l3-4h12l3 4M16 13.5h2',
+  calendario: 'M4 5h16v16H4zM4 10h16M9 3v4M15 3v4',
+  compras: 'M3 4h2l2.5 11h11L21 7H6.5M9 20h.01M18 20h.01',
+  resumo: 'M3 11l9-7 9 7M5 10v10h14V10',
+  lancamentos: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
+  cartoes: 'M2 7h20v12H2zM2 11h20',
+  investimentos: 'M3 17l6-6 4 4 8-8M15 7h6v6',
+  calculadoras: 'M5 3h14v18H5zM8 7h8M8 12h.01M12 12h.01M16 12h.01M8 16h.01M12 16h.01M16 16h.01',
+  dicas: 'M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5V16h8v-2.5A6 6 0 0 0 12 3z',
+  plus: 'M12 5v14M5 12h14',
+  importar: 'M12 3v12M7 10l5 5 5-5M5 21h14',
+  copiar: 'M8 4h11v13H8zM5 7v13h11',
+  edit: 'M4 20h4L19 9l-4-4L4 16v4z',
+  trash: 'M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3',
+  tema: 'M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z',
+  sair: 'M9 21H5V3h4M16 17l5-5-5-5M21 12H9',
+  menu: 'M4 7h16M4 12h16M4 17h10',
+  fechar: 'M6 6l12 12M18 6L6 18',
+  avancar: 'M9 5l7 7-7 7',
+  agenda: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
+  pessoas: 'M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21v-1a6 6 0 0 1 12 0v1M16 3.5a4 4 0 0 1 0 7.5M22 21v-1a6 6 0 0 0-4-5.6',
+  link: 'M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1',
+  refresh: 'M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7',
+};
+export const ico = (k, s = 20) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${IC[k] || IC.inicio}"></path></svg>`;

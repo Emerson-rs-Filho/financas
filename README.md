@@ -1,6 +1,12 @@
-# Nossa Casa — finanças do casal
+# Nossa Casa — painel da casa
 
-App web das finanças da casa: resumo do ano com gráficos, lançamentos mês a mês, cartões, investimentos e dicas de economia calculadas a partir dos dados. Tem modo claro e escuro e login com e-mail e senha.
+App web para gerenciar a casa. Depois do login aparece a tela inicial com as **áreas da casa**:
+
+- **Finanças** — resumo do ano com gráficos, lançamentos mês a mês, cartões (com importação da fatura do Nubank), investimentos, calculadoras e dicas de economia.
+- **Calendário** — em breve.
+- **Lista de compras** — compartilhada entre vocês dois, atualiza na hora nos dois celulares e recebe itens pela Alexa ("Alexa, peça à nossa casa para adicionar leite").
+
+Tem modo claro e escuro, funciona no celular e no computador, e o login é com e-mail e senha.
 
 - **Hospedagem:** GitHub Pages (grátis)
 - **Login e banco de dados:** Supabase (plano grátis)
@@ -53,7 +59,65 @@ npx supabase functions deploy cotacoes --no-verify-jwt
 
 O `--no-verify-jwt` é necessário porque a própria função confere o login. Sem a função publicada, as calculadoras de Meta, Projeção e Renda fixa continuam funcionando com uma taxa digitada à mão. Só o simulador de **Histórico** precisa dela.
 
+## Passo 4 — Lista de compras pela Alexa (skill particular)
+
+A Amazon desligou em julho de 2024 o acesso de outros apps à lista de compras nativa da Alexa. Por isso o Nossa Casa tem a **própria skill**, que só existe na sua conta (fica em modo de desenvolvimento, não vai para a loja e é grátis). Você fala com ela começando por "nossa casa":
+
+- "Alexa, peça à nossa casa para adicionar leite e pão"
+- "Alexa, pergunte à nossa casa o que tem na lista"
+- "Alexa, diga à nossa casa que já comprei leite"
+- "Alexa, abre nossa casa" → "adiciona café"
+
+> "Alexa, adiciona leite na lista" (sem "nossa casa") continua indo para a lista **nativa** da Alexa, não para o app.
+
+**Uma vez só:**
+
+1. Rode de novo o `supabase/schema.sql` no SQL Editor (cria a tabela `compras_itens` e liga o tempo real).
+2. Entre em https://developer.amazon.com/alexa/console/ask com **a mesma conta Amazon dos seus Echo** e clique em **Create Skill**:
+   - nome: *Nossa Casa* · idioma: **Portuguese (BR)**
+   - tipo: **Other → Custom** · hospedagem: **Provision your own**
+   - template: **Start from Scratch**
+3. No menu da skill, abra **Interaction Model → JSON Editor**, apague tudo, cole o conteúdo de `alexa/modelo-pt-BR.json`, clique em **Save** e depois em **Build skill**.
+4. Copie o **Skill ID** (aparece na lista de skills, começa com `amzn1.ask.skill.`) e publique a função, dentro desta pasta:
+   ```bash
+   npx supabase secrets set ALEXA_SKILL_ID=amzn1.ask.skill.COLE-AQUI
+   npx supabase functions deploy alexa --no-verify-jwt
+   ```
+5. Em **Endpoint**, escolha **HTTPS**. Em *Default Region*, cole `https://SEU-PROJETO.supabase.co/functions/v1/alexa` (a Project URL do `js/config.js` + `/functions/v1/alexa`). No certificado, escolha *"My development endpoint is a sub-domain of a domain that has a wildcard certificate from a certificate authority"*. Clique em **Save**.
+6. Na aba **Test**, troque *Off* por **Development** e escreva "abre nossa casa" para testar. Pronto: funciona em todos os Echo e no app Alexa da mesma conta.
+
+A função confere que cada pedido veio mesmo da Alexa (assinatura da Amazon) e da sua skill (Skill ID), e grava na lista com a chave de serviço, que fica só no servidor do Supabase.
+
+**Dica:** no app Alexa, crie uma **Rotina** com uma frase curta (ex.: "acabou o café") que dispara "peça à nossa casa para adicionar café".
+
+## Passo 5 — Calendário (Google Agenda)
+
+Cada pessoa da casa entra no app com o próprio login, conecta **a sua** conta Google e escolhe quais agendas a família pode ver. Quem conecta é o servidor do Supabase: as chaves do Google ficam cifradas no banco, e o navegador nunca recebe um token do Google.
+
+**Uma vez só:**
+
+1. Rode de novo o `supabase/schema.sql` no SQL Editor. Ele cria as tabelas `cal_*` e liga o tempo real.
+2. Em https://console.cloud.google.com crie um projeto (ex.: *Nossa Casa*) e configure:
+   - **APIs e serviços → Biblioteca:** ative a **Google Calendar API**.
+   - **Tela de permissão OAuth:** escolha o tipo *Externo*, informe o nome *Nossa Casa* e o seu e-mail, e adicione os escopos `.../auth/calendar.events` e `.../auth/calendar.calendarlist.readonly`.
+   - Depois, em **Público-alvo**, clique em **Publicar app** (status *Em produção*). Se o app ficar em *Teste*, o Google desconecta todo mundo a cada 7 dias. O app não precisa passar pela verificação do Google. Na hora de conectar aparece o aviso "o Google não verificou este app": clique em **Avançado → Acessar Nossa Casa**.
+   - **Credenciais → Criar credenciais → ID do cliente OAuth:** escolha o tipo **Aplicativo da Web** e, em *URIs de redirecionamento autorizados*, coloque `https://SEU-PROJETO.supabase.co/functions/v1/google-auth`. Copie o **ID do cliente** e a **Chave secreta**.
+3. Dentro desta pasta, configure os secrets e publique as funções:
+   ```bash
+   npx supabase secrets set GOOGLE_CLIENT_ID=COLE-O-ID GOOGLE_CLIENT_SECRET=COLE-A-CHAVE \
+     APP_URL=https://SEU-USUARIO.github.io/financas/ \
+     OAUTH_STATE_SECRET=$(openssl rand -hex 32) TOKEN_KEY=$(openssl rand -hex 32) CRON_SECRET=$(openssl rand -hex 32)
+   npx supabase functions deploy google-auth --no-verify-jwt
+   npx supabase functions deploy agenda --no-verify-jwt
+   ```
+   O `APP_URL` é o endereço do app no GitHub Pages, com a barra no final. **Não troque o `TOKEN_KEY` depois**: sem ele, os tokens já guardados não podem mais ser lidos e todos precisam conectar de novo.
+4. **Opcional:** para sincronizar mesmo com o app fechado, use o trecho do `pg_cron` que está comentado no fim do `schema.sql`. Sem ele, o app sincroniza sempre que alguém abre o calendário e já se passaram 5 minutos desde a última vez, e também pelo botão de sincronizar.
+
 ## Como usar
+
+Depois de entrar, escolha a área na tela inicial. Para trocar de área: no computador, use os ícones no topo do menu lateral (ou clique em *nossa casa.*); no celular, toque no nome da área no topo ou abra o menu ☰ → *áreas da casa*. Links antigos como `#lancamentos` continuam funcionando e abrem `#financas/lancamentos`.
+
+### Finanças
 
 - **Resumo:** saldo do ano, gráfico de entradas e saídas, para onde foi o dinheiro e as principais dicas.
 - **Lançamentos:** escolha o mês, adicione, edite ou exclua. O botão *Copiar fixos do mês anterior* copia as contas fixas (sem cartões e "outras") para você só ajustar os valores.
@@ -71,13 +135,42 @@ O `--no-verify-jwt` é necessário porque a própria função confere o login. S
 
 Os meses do ano corrente que ainda não fecharam aparecem como previsão (tracejado) e não entram nas médias.
 
+### Lista de compras
+
+- Digite no campo e aperte Enter. Dá para adicionar vários de uma vez e com quantidade: "2 leite, pão e 1 kg de café".
+- Toque no item para marcar como comprado (ele vai para *comprados*); toque de novo para voltar. *Limpar comprados* apaga os que já foram comprados.
+- Itens que vieram pela Alexa aparecem com o selo **alexa**. Um item repetido não é duplicado: se já foi comprado, ele volta para a lista.
+- A lista atualiza sozinha quando o outro celular ou a Alexa mexe nela.
+
+### Calendário
+
+- **Agendas:** toque em *conectar Google Agenda* e autorize. Depois, em cada agenda, marque:
+  - **compartilhar com a família** para que todos vejam os eventos dela;
+  - **família pode adicionar eventos** para que os outros criem eventos nela, que vão direto para o seu Google Agenda.
+  
+  Agendas não marcadas não aparecem para ninguém. Eventos marcados como *particulares* no Google aparecem só como "Ocupado".
+- **Agenda:** os próximos 30 dias, separados por dia, com uma cor por agenda e o nome de quem compartilhou. *Mostrar mais 30 dias* vai mais longe.
+- **Mês:** a grade do mês. Toque num dia para ver os eventos daquele dia ou para adicionar um.
+- **Novo evento:** escolha a agenda (as suas compartilhadas e as que a família liberou). Quem criou o evento pelo app, ou o dono da agenda, pode excluí-lo.
+- Para editar um evento, use o Google Agenda. A mudança aparece no app na próxima sincronização.
+
 ## Estrutura
 
 ```
 index.html            página única
 css/style.css         visual (tema claro/escuro)
 js/config.js          ← suas chaves do Supabase
-js/app.js             telas e navegação
+js/app.js             núcleo: login, tela inicial, rotas, menus
+js/modulos.js         lista das áreas da casa (módulos)
+js/ui.js              utilitários de tela e ícones compartilhados
+js/financas/index.js  módulo Finanças (todas as telas de finanças)
+js/compras/           módulo Lista de compras (+ itens.js: entende "2 leite, pão e café")
+js/calendario/        módulo Calendário (agenda, mês, agendas conectadas)
+supabase/functions/google-auth/  conecta/desconecta a conta Google (OAuth)
+supabase/functions/agenda/       sincroniza, cria e exclui eventos no Google Agenda
+supabase/functions/_shared/      código comum das duas (tokens cifrados, Calendar API)
+alexa/modelo-pt-BR.json        modelo de voz da skill (colar no console da Alexa)
+supabase/functions/alexa/      função que atende a skill (usa uma cópia de itens.js)
 js/data.js            Supabase / modo demonstração
 js/insights.js        cálculos e dicas
 js/importar.js        leitura do CSV do Nubank e sugestão de categorias
@@ -89,8 +182,27 @@ supabase/schema.sql   tabelas e segurança
 supabase/seed_2026.sql dados iniciais
 ```
 
+## Como criar uma nova área (módulo)
+
+1. Crie a pasta `js/<id>/` com um `index.js` que exporta o módulo:
+   ```js
+   export default {
+     id: 'calendario', nome: 'Calendário',
+     abas: [['mes', 'Mês', 'calendario']],           // [id, nome, ícone de js/ui.js]
+     barra: ['mes'],                                 // opcional: itens da barra inferior no celular
+     async carregar(ctx) { /* busca os dados na primeira entrada */ },
+     render(aba, el, ctx) { el.innerHTML = '...'; }, // desenha a aba; ctx.render() redesenha tudo
+     acao(nome, botao, ctx) { /* cliques em [data-action] */ },
+     mudou(ev, ctx) {},                              // opcional: eventos change
+     topo(ctx, id) { return ''; },                   // opcional: controles extras no menu (ex.: ano)
+   };
+   ```
+2. Em `js/modulos.js`, troque o status da área para `'ativo'` e aponte o `load()` para o arquivo.
+3. Se a área precisar de tabelas, acrescente-as em `supabase/schema.sql` com as mesmas regras de segurança.
+
 ## Próximos passos possíveis
 
+- Calendário: editar eventos pelo app e mostrar as contas a vencer do módulo Finanças
 - Importar as abas de 2023 e 2025 e os detalhes dos cartões
 - Importar faturas de outros bancos
 - Metas de gasto por categoria, com alerta quando passar
