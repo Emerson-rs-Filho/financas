@@ -56,7 +56,7 @@ A chave *anon* pode ficar no código público. Quem protege os dados são as reg
 
 ## Passo 3 — Cotações (aba Calculadoras)
 
-A aba **Calculadoras** busca cotações no Yahoo Finance e CDI, Selic e IPCA no Banco Central. O navegador não pode acessar essas fontes direto, então quem faz a busca é uma função no Supabase (`supabase/functions/cotacoes`). Só usuários logados conseguem usá-la. Para publicar a função, rode no terminal, dentro desta pasta:
+A aba **Calculadoras** e as **ações e FIIs** de Investimentos buscam cotações no Yahoo Finance e CDI, Selic e IPCA no Banco Central. O navegador não pode acessar essas fontes direto, então quem faz a busca é uma função no Supabase (`supabase/functions/cotacoes`). Só usuários logados conseguem usá-la. Para publicar a função, rode no terminal, dentro desta pasta:
 
 ```bash
 npx supabase login
@@ -141,6 +141,8 @@ Depois de entrar, escolha a área na tela inicial. Para trocar de área: no comp
 
 > **Já usa o app?** Para ativar a importação, rode de novo o `supabase/schema.sql` inteiro no **SQL Editor** do Supabase. Ele só adiciona as colunas novas (`cartao`, `data_compra`, `import_key`) e não mexe nos dados.
 - **Investimentos:** cadastre aportes e acompanhe a meta da reserva de emergência (6× o gasto médio mensal).
+- **Ações e FIIs:** em *nova ação/FII*, informe o ticker (ex.: WIZC3, MXRF11), a quantidade de cotas e o preço médio. Ao editar, *comprei mais* soma as cotas e recalcula o preço médio; *vendi* tira as cotas e mantém o preço médio. O preço atual vem da cotação (botão *atualizar cotações*, e sozinho ao abrir a aba quando a última tem mais de 30 minutos). Um investimento antigo do tipo "Ações / FIIs" pode ser convertido pelo link *usar quantidade e cotação*.
+  > Já usa o app? Rode de novo o `supabase/schema.sql` (colunas novas em `investimentos`) e publique de novo a função `cotacoes` (Passo 3).
 - **Calculadoras:**
   - **Meta:** quanto guardar por mês para juntar um valor num prazo.
   - **Projeção:** juros compostos com aportes mensais.

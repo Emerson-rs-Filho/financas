@@ -1,4 +1,5 @@
 // Edge Function "cotacoes": proxy para Yahoo Finance e Banco Central (SGS).
+// tipo=precos&tickers=WIZC3,MXRF11 devolve o preço atual de cada ativo da B3.
 // Só usuários logados no app podem chamar. Deploy:
 //   npx supabase functions deploy cotacoes --no-verify-jwt
 import { createClient } from 'jsr:@supabase/supabase-js@2';
@@ -78,6 +79,24 @@ async function historico(ticker: string, inicio: string) {
   };
 }
 
+// Preço atual de ativos da B3 (o Yahoo usa o sufixo .SA).
+async function precoAtual(ticker: string) {
+  const simbolo = ticker.includes('.') || ticker.startsWith('^') ? ticker : `${ticker}.SA`;
+  const d = await getJson(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(simbolo)}?range=1d&interval=1d`);
+  const p = d?.chart?.result?.[0]?.meta?.regularMarketPrice;
+  if (!(p > 0)) throw new Error('sem preço');
+  return Number(p);
+}
+
+async function precos(tickers: string[]) {
+  const out: Record<string, number> = {};
+  const erros: string[] = [];
+  await Promise.all(tickers.map(async (t) => {
+    try { out[t] = await cached('p:' + t, () => precoAtual(t)); } catch { erros.push(t); }
+  }));
+  return { precos: out, erros };
+}
+
 // ---------- handler ----------
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
@@ -104,7 +123,12 @@ Deno.serve(async (req) => {
       if (!DATA.test(inicio)) return json({ error: 'Data inválida.' }, 400);
       return json(await cached(`h:${ticker}:${inicio}`, () => historico(ticker, inicio)));
     }
-    return json({ error: 'Use tipo=taxas, historico ou cdi_mensal.' }, 400);
+    if (tipo === 'precos') {
+      const lista = [...new Set((q.get('tickers') || '').toUpperCase().split(',').map((t) => t.trim()).filter(Boolean))];
+      if (!lista.length || lista.length > 30 || !lista.every((t) => TICKER.test(t))) return json({ error: 'Tickers inválidos.' }, 400);
+      return json(await precos(lista));
+    }
+    return json({ error: 'Use tipo=taxas, historico, cdi_mensal ou precos.' }, 400);
   } catch (e) {
     return json({ error: (e as Error).message }, 502);
   }

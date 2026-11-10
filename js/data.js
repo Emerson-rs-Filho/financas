@@ -119,12 +119,17 @@ export async function listInvestimentos() {
   const c = await client();
   const { data, error } = await c.from('investimentos').select('*').order('data_aplicacao', { ascending: false });
   if (error) throw error;
-  return data.map((r) => ({ ...r, valor_aplicado: Number(r.valor_aplicado), valor_atual: Number(r.valor_atual) }));
+  const num = (v) => (v == null ? null : Number(v));
+  return data.map((r) => ({ ...r, valor_aplicado: Number(r.valor_aplicado), valor_atual: Number(r.valor_atual),
+    quantidade: num(r.quantidade), preco_medio: num(r.preco_medio), preco_atual: num(r.preco_atual) }));
 }
 
 export async function saveInvestimento(i) {
   const row = { nome: i.nome.trim(), tipo: i.tipo, instituicao: (i.instituicao || '').trim(), valor_aplicado: +i.valor_aplicado,
     valor_atual: +(i.valor_atual || i.valor_aplicado), data_aplicacao: i.data_aplicacao || null, objetivo: i.objetivo || 'Reserva de emergência' };
+  // ações e FIIs: só envia as colunas novas quando há ticker, para o resto funcionar mesmo antes de rodar o schema
+  if (i.ticker) Object.assign(row, { ticker: String(i.ticker).trim().toUpperCase(), quantidade: +i.quantidade, preco_medio: +i.preco_medio,
+    preco_atual: i.preco_atual === '' || i.preco_atual == null ? null : +i.preco_atual, cotado_em: i.cotado_em || null });
   if (DEMO) {
     if (i.id) Object.assign(demo.investimentos.find((x) => x.id === +i.id), row);
     else demo.investimentos.push({ id: demo.nextId++, ...row });
@@ -134,7 +139,7 @@ export async function saveInvestimento(i) {
   const c = await client();
   const q = i.id ? c.from('investimentos').update(row).eq('id', i.id) : c.from('investimentos').insert(row);
   const { error } = await q;
-  if (error) throw error;
+  if (error) throw new Error(/ticker|quantidade|preco_/.test(error.message) ? 'Faltam as colunas de ações e FIIs. Rode de novo o arquivo supabase/schema.sql no SQL Editor do Supabase.' : error.message);
 }
 
 export async function deleteInvestimento(id) {
@@ -251,6 +256,38 @@ export async function desfazerPagamento(p) {
 }
 
 // ---------- cotações (Edge Function "cotacoes") ----------
+// Preço atual de vários tickers da B3. Devolve { precos: { WIZC3: 8.42 }, erros: ['XPTO11'] }.
+export async function cotacoesAtuais(tickers) {
+  const lista = [...new Set(tickers.map((t) => String(t).trim().toUpperCase()).filter(Boolean))];
+  if (!lista.length) return { precos: {}, erros: [] };
+  if (DEMO) {
+    // preço fictício estável por ticker (varia de -15% a +25% sobre o preço médio)
+    const precos = {};
+    lista.forEach((t) => {
+      const inv = demo.investimentos.find((i) => i.ticker === t);
+      const h = [...t].reduce((s, ch) => (s * 31 + ch.charCodeAt(0)) % 1000, 7) / 1000;
+      precos[t] = Math.round(((inv && inv.preco_medio) || 10) * (0.85 + h * 0.4) * 100) / 100;
+    });
+    return { precos, erros: [], exemplo: true };
+  }
+  return cotacoes({ tipo: 'precos', tickers: lista.join(',') });
+}
+
+// Grava o preço atual de cada ativo e o valor atual (quantidade × preço).
+export async function atualizarCotacoes(invs, precos) {
+  const agora = new Date().toISOString();
+  for (const i of invs) {
+    const p = precos[i.ticker];
+    if (!(p > 0)) continue;
+    const campos = { preco_atual: p, valor_atual: Math.round(i.quantidade * p * 100) / 100, cotado_em: agora };
+    if (DEMO) { Object.assign(demo.investimentos.find((x) => x.id === i.id) || {}, campos); continue; }
+    const c = await client();
+    const { error } = await c.from('investimentos').update(campos).eq('id', i.id);
+    if (error) throw error;
+  }
+  if (DEMO) demoSave();
+}
+
 const TAXAS_DEMO = { selic: { valor: 13.75, data: '' }, cdi: { valor: 13.65, data: '' }, ipca: { valor: 4.6, data: '' }, exemplo: true };
 
 export async function cotacoes(params) {

@@ -35,6 +35,13 @@ create table if not exists public.investimentos (
   criado_em       timestamptz not null default now()
 );
 
+-- Ações e FIIs: quantidade, preço médio e cotação (preenchidos quando há ticker).
+alter table public.investimentos add column if not exists ticker       text;           -- ex.: WIZC3, MXRF11
+alter table public.investimentos add column if not exists quantidade   numeric(16,6);
+alter table public.investimentos add column if not exists preco_medio  numeric(14,4);
+alter table public.investimentos add column if not exists preco_atual  numeric(14,4);
+alter table public.investimentos add column if not exists cotado_em    timestamptz;
+
 -- Segurança: só usuários logados acessam. Como o cadastro público fica
 -- desligado, os únicos usuários são os que vocês criarem no painel.
 alter table public.lancamentos   enable row level security;

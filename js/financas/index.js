@@ -7,7 +7,7 @@ import { modal, esc, css, ico, sinal, PAL } from '../ui.js';
 
 const S = { lancs: [], invs: [], ano: new Date().getFullYear(), mes: null, charts: [],
   calc: 'meta', calcIn: {}, taxas: null, taxasErr: '', hist: null,
-  contas: [], pags: [], orc: [], erroExtra: '' };
+  contas: [], pags: [], orc: [], erroExtra: '', cotErro: '' };
 const TIPOS_INV = ['Reserva de emergência', 'Tesouro Direto', 'CDB / LCI / LCA', 'Fundos', 'Ações / FIIs', 'Previdência', 'Outros'];
 
 // contexto do núcleo (render da estrutura, aba atual, navegação)
@@ -406,7 +406,11 @@ function viewInvestimentos(el) {
   const tipos = [...S.invs.reduce((mp, i) => mp.set(i.tipo, (mp.get(i.tipo) || 0) + i.valor_atual), new Map())].sort((a, b) => b[1] - a[1]);
   const corTipo = new Map(tipos.map(([t], i) => [t, PAL[i % PAL.length]]));
   el.innerHTML = `
-  <div class="page-head"><h1>investimentos</h1><button class="btn lime" data-action="novo-i">${ico('plus', 16)}novo investimento</button></div>
+  <div class="page-head"><h1>investimentos</h1>
+    <div class="actions">${S.invs.some(ehBolsa) ? `<button class="btn" data-action="cotar-i" title="Atualizar cotações">${ico('refresh', 16)}<span class="lbl">atualizar cotações</span></button>` : ''}
+      <button class="btn" data-action="nova-acao">${ico('investimentos', 16)}<span class="lbl">nova ação/FII</span></button>
+      <button class="btn lime" data-action="novo-i">${ico('plus', 16)}novo investimento</button></div></div>
+  ${S.cotErro ? `<div class="alertas"><span class="alerta neg">${ico('alerta', 16)}${esc(S.cotErro)}</span></div>` : ''}
   <section class="row2">
     <div class="tile" style="flex:1 1 300px;display:flex;flex-direction:column;gap:8px">
       <span class="eyebrow">patrimônio hoje</span>
@@ -431,7 +435,9 @@ function viewInvestimentos(el) {
       <div class="tile-head"><h2>aplicações</h2><span class="muted num" style="font-size:12px">${S.invs.length}</span></div>
       <div class="list">${S.invs.map((i) => { const g = i.valor_atual - i.valor_aplicado; return `
         <div class="li tap" data-action="edit-i" data-id="${i.id}"><span class="li-ic dot"><i style="background:${corTipo.get(i.tipo)}"></i></span>
-          <div class="li-main"><span class="li-t">${esc(i.nome)}</span><span class="li-s">${esc(i.tipo)}${i.instituicao ? ' · ' + esc(i.instituicao) : ''}${i.data_aplicacao ? ' · desde ' + new Date(i.data_aplicacao + 'T12:00').toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' }) : ''}</span></div>
+          <div class="li-main">${ehBolsa(i)
+            ? `<span class="li-t">${esc(i.ticker)} <small class="muted">${classeDe(i)}</small></span><span class="li-s">${qtdTxt(i.quantidade)} ${+i.quantidade === 1 ? 'cota' : 'cotas'} · PM ${precoTxt(i.preco_medio)}${i.preco_atual ? ` · cotação ${precoTxt(i.preco_atual)}${i.cotado_em ? ` (${haQuanto(i.cotado_em)})` : ''}` : ' · sem cotação'}${i.instituicao ? ' · ' + esc(i.instituicao) : ''}</span>`
+            : `<span class="li-t">${esc(i.nome)}</span><span class="li-s">${esc(i.tipo)}${i.instituicao ? ' · ' + esc(i.instituicao) : ''}${i.data_aplicacao ? ' · desde ' + new Date(i.data_aplicacao + 'T12:00').toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' }) : ''}</span>`}</div>
           <div class="li-v num">${brl(i.valor_atual, 2)}<small class="${g >= 0 ? 'pos' : 'neg'}">${sinal(g)}${brl(Math.abs(g), 2)}</small></div>
           <div class="li-act"><button data-action="edit-i" data-id="${i.id}" aria-label="Editar ${esc(i.nome)}">${ico('edit', 17)}</button><button data-action="del-i" data-id="${i.id}" aria-label="Excluir ${esc(i.nome)}">${ico('trash', 17)}</button></div></div>`; }).join('')}</div>
     </div>
@@ -440,7 +446,9 @@ function viewInvestimentos(el) {
       <div class="seg">${tipos.map(([t, v]) => `<span style="flex:${v};background:${corTipo.get(t)}"></span>`).join('')}</div>
       <div class="lg" style="flex-direction:column;gap:8px">${tipos.map(([t, v]) => `<span style="display:flex;justify-content:space-between;gap:8px"><span><i style="background:${corTipo.get(t)}"></i>${esc(t)}</span><span class="num"><span class="muted">${atual ? Math.round(v / atual * 100) : 0}% · </span>${brl(v)}</span></span>`).join('')}</div>
     </div>
-  </section>` : '<div class="empty">Nenhum investimento cadastrado ainda. Toque em <strong>novo investimento</strong> para registrar o primeiro aporte.</div>'}`;
+  </section>` : '<div class="empty">Nenhum investimento cadastrado ainda. Toque em <strong>novo investimento</strong> para registrar o primeiro aporte, ou em <strong>nova ação/FII</strong> para cadastrar ações e fundos imobiliários pela quantidade de cotas.</div>'}`;
+  const velha = S.invs.filter(ehBolsa).some((i) => !i.cotado_em || Date.now() - new Date(i.cotado_em) > 30 * 60000);
+  if (velha && !S.cotTentou) { S.cotTentou = true; atualizarCotacoesTela(true); }
 }
 
 function invForm(i) {
@@ -458,10 +466,15 @@ function invForm(i) {
       <label class="field">Valor atual (R$)<input name="valor_atual" type="number" step="0.01" min="0" value="${i.valor_atual ?? ''}" placeholder="igual ao aplicado"></label>
     </div>
     <label class="field">Data da aplicação<input name="data_aplicacao" type="date" value="${i.data_aplicacao || ''}"></label>
+    <p class="muted" id="inv-bolsa" style="margin:0;font-size:12px;line-height:1.5" ${i.tipo === 'Ações / FIIs' ? '' : 'hidden'}>Para ações e FIIs, dá para informar a quantidade de cotas e acompanhar a cotação: <button type="button" class="link-btn" id="inv-usar-bolsa">usar quantidade e cotação</button></p>
     <div class="error" id="f-err" role="alert"></div>
     <div class="dialog-actions">${i.id ? '<button class="pill danger" value="del" formnovalidate>Excluir</button>' : ''}<button class="pill" value="cancel" formnovalidate>Cancelar</button><button class="pill green" value="ok">Salvar</button></div>
   </form>`;
   const f = modal.querySelector('form');
+  f.tipo.addEventListener('change', () => { f.querySelector('#inv-bolsa').hidden = f.tipo.value !== 'Ações / FIIs'; });
+  // converte o investimento atual num ativo de bolsa (mantém id, instituição e data)
+  f.querySelector('#inv-usar-bolsa').addEventListener('click', () => acaoForm({ id: i.id, nome: f.nome.value, _converter: true,
+    instituicao: f.instituicao.value, data_aplicacao: f.data_aplicacao.value }));
   f.addEventListener('submit', async (ev) => {
     if (ev.submitter && ev.submitter.value === 'cancel') return;
     ev.preventDefault();
@@ -479,6 +492,145 @@ function invForm(i) {
     } catch (e) { modal.querySelector('#f-err').textContent = e.message; }
   });
   modal.showModal();
+}
+
+// ---------------- Ações e FIIs (quantidade, preço médio e cotação) ----------------
+const CLASSES_B3 = ['Ação', 'FII', 'ETF', 'BDR'];
+const ehBolsa = (i) => !!(i && i.ticker);
+const qtdTxt = (q) => (+q || 0).toLocaleString('pt-BR', { maximumFractionDigits: 6 });
+const precoTxt = (p) => (+p || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 4 });
+const haQuanto = (iso) => {
+  if (!iso) return '';
+  const min = Math.round((Date.now() - new Date(iso)) / 60000);
+  if (min < 1) return 'agora';
+  if (min < 60) return `há ${min} min`;
+  const h = Math.round(min / 60);
+  return h < 24 ? `há ${h} h` : `em ${new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}`;
+};
+// classe guardada no começo do campo "objetivo" (ex.: "FII"); o tipo fica 'Ações / FIIs' para o gráfico por tipo
+const classeDe = (i) => (CLASSES_B3.includes(i.objetivo) ? i.objetivo : /11$/.test(i.ticker || '') ? 'FII' : 'Ação');
+
+// Nova compra: soma a quantidade e recalcula o preço médio ponderado.
+export const comprarMais = (q1, pm1, q2, p2) => ({ quantidade: q1 + q2, preco_medio: (q1 * pm1 + q2 * p2) / (q1 + q2) });
+
+let cotando = false;
+// Busca o preço de todos os ativos com ticker e grava. silencioso: não mostra alerta (usado ao abrir a aba).
+async function atualizarCotacoesTela(silencioso = false) {
+  const ativos = S.invs.filter(ehBolsa);
+  if (!ativos.length || cotando) return;
+  cotando = true;
+  const b = document.querySelector('[data-action="cotar-i"]');
+  if (b) { b.disabled = true; b.querySelector('.lbl') && (b.querySelector('.lbl').textContent = 'atualizando…'); }
+  try {
+    const r = await db.cotacoesAtuais(ativos.map((i) => i.ticker));
+    await db.atualizarCotacoes(ativos, r.precos || {});
+    S.invs = await db.listInvestimentos();
+    S.cotErro = (r.erros || []).length ? `Não achei a cotação de ${r.erros.join(', ')}. Confira o ticker.` : '';
+  } catch (e) {
+    S.cotErro = e.message;
+    if (!silencioso) alert(e.message);
+  }
+  cotando = false;
+  if (route() === 'investimentos') render();
+}
+
+function acaoForm(i = {}) {
+  const editar = !!i.id;
+  const temAtivo = !!i.ticker; // já é ação/FII (senão é cadastro novo ou conversão de um investimento antigo)
+  const sugestao = i.ticker || (i._converter ? ((/[A-Z]{4}[0-9]{1,2}/.exec(String(i.nome || '').toUpperCase()) || [''])[0]) : '');
+  const classe = i.ticker ? classeDe(i) : 'Ação';
+  modal.innerHTML = `
+  <form method="dialog" id="f-acao">
+    <h2 class="h2" style="font-size:24px">${temAtivo ? esc(i.ticker) : i._converter ? 'Converter para ação/FII' : 'Nova ação ou FII'}</h2>
+    ${temAtivo ? `<div class="acao-mov">
+      <div class="seg-btns" role="group" aria-label="Movimento"><button type="button" data-mov="comprar">comprei mais</button><button type="button" data-mov="vender">vendi</button></div>
+      <div class="grid2" id="acao-mov-campos" hidden>
+        <label class="field" id="acao-mov-q">Quantidade<input name="mov_qtd" type="number" inputmode="decimal" step="any" min="0.000001"></label>
+        <label class="field" id="acao-mov-p">Preço pago (R$)<input name="mov_preco" type="number" inputmode="decimal" step="any" min="0"></label>
+      </div>
+    </div>` : ''}
+    <div class="grid2">
+      <label class="field">Ticker<input name="ticker" required maxlength="12" value="${esc(sugestao)}" placeholder="Ex.: WIZC3, MXRF11" autocapitalize="characters" autocomplete="off" style="text-transform:uppercase"></label>
+      <label class="field">Classe<select name="classe">${CLASSES_B3.map((c) => `<option ${c === classe ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
+    </div>
+    <div class="grid2">
+      <label class="field">Quantidade<input name="quantidade" type="number" inputmode="decimal" step="any" min="0.000001" required value="${i.quantidade ?? ''}" placeholder="Ex.: 400"></label>
+      <label class="field">Preço médio (R$)<input name="preco_medio" type="number" inputmode="decimal" step="any" min="0" required value="${i.preco_medio ?? ''}" placeholder="Ex.: 8,10"></label>
+    </div>
+    <div class="grid2">
+      <label class="field">Preço atual (R$)<input name="preco_atual" type="number" inputmode="decimal" step="any" min="0" value="${i.preco_atual ?? ''}" placeholder="vem da cotação"></label>
+      <label class="field">Instituição<input name="instituicao" value="${esc(i.instituicao || '')}" placeholder="Ex.: Nubank, XP"></label>
+    </div>
+    <label class="field">Data da primeira compra<input name="data_aplicacao" type="date" value="${i.data_aplicacao || ''}"></label>
+    <p class="acao-total num" id="acao-total" aria-live="polite"></p>
+    <div class="error" id="f-err" role="alert"></div>
+    <div class="dialog-actions">${editar ? '<button class="pill danger" value="del" formnovalidate>Excluir</button>' : ''}<button class="pill" value="cancel" formnovalidate>Cancelar</button><button class="pill green" value="ok">Salvar</button></div>
+  </form>`;
+  const f = modal.querySelector('form');
+  let mov = '';
+  // quantidade e preço médio depois do movimento ("comprei mais" / "vendi"), sem gravar ainda
+  const resultado = () => {
+    let q = +f.quantidade.value || 0, pm = +f.preco_medio.value || 0;
+    const mq = mov && f.mov_qtd ? +f.mov_qtd.value || 0 : 0;
+    if (mov === 'comprar' && mq > 0) ({ quantidade: q, preco_medio: pm } = comprarMais(q, pm, mq, +f.mov_preco.value || 0));
+    if (mov === 'vender' && mq > 0) q = Math.max(0, q - mq); // na venda o preço médio não muda
+    return { q, pm };
+  };
+  const mostrar = () => {
+    const { q, pm } = resultado();
+    const atual = +f.preco_atual.value || 0;
+    const inv = q * pm, hoje = q * (atual || pm);
+    const g = hoje - inv;
+    f.querySelector('#acao-total').innerHTML = q && pm
+      ? `${mov && +f.mov_qtd.value ? `fica ${qtdTxt(q)} ${q === 1 ? 'cota' : 'cotas'} a ${precoTxt(pm)} · ` : ''}investido <strong>${brl(inv, 2)}</strong>${atual ? ` · hoje <strong>${brl(hoje, 2)}</strong> <span class="${g >= 0 ? 'pos' : 'neg'}">${sinal(g)}${(Math.abs(g) / inv * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%</span>` : ''}`
+      : '';
+  };
+  f.querySelectorAll('[data-mov]').forEach((b) => b.addEventListener('click', () => {
+    mov = mov === b.dataset.mov ? '' : b.dataset.mov;
+    f.querySelectorAll('[data-mov]').forEach((x) => x.setAttribute('aria-pressed', x.dataset.mov === mov));
+    f.querySelector('#acao-mov-campos').hidden = !mov;
+    f.querySelector('#acao-mov-p').hidden = mov !== 'comprar';
+    f.mov_qtd.required = !!mov; f.mov_preco.required = mov === 'comprar';
+    if (mov) f.mov_qtd.focus();
+    mostrar();
+  }));
+  f.addEventListener('input', mostrar);
+  f.ticker.addEventListener('change', () => { if (!temAtivo && /11$/.test(f.ticker.value.trim())) f.classe.value = 'FII'; });
+  mostrar();
+  f.addEventListener('submit', async (ev) => {
+    if (ev.submitter && ev.submitter.value === 'cancel') return;
+    ev.preventDefault();
+    const err = f.querySelector('#f-err');
+    try {
+      if (ev.submitter && ev.submitter.value === 'del') {
+        if (!confirm(`Excluir ${i.ticker || i.nome}?`)) return;
+        await db.deleteInvestimento(i.id);
+      } else {
+        if (!f.reportValidity()) return;
+        const ticker = f.ticker.value.trim().toUpperCase().replace(/\.SA$/, '');
+        if (!/^[A-Z0-9]{4,8}$/.test(ticker)) { err.textContent = 'Ticker inválido. Use o código da B3, ex.: WIZC3 ou MXRF11.'; return; }
+        if (mov === 'vender' && (+f.mov_qtd.value || 0) > (+f.quantidade.value || 0)) { err.textContent = 'A venda é maior que a quantidade que você tem.'; return; }
+        const { q, pm } = resultado();
+        if (!(q > 0)) {
+          if (!confirm(`Você vendeu todas as cotas de ${ticker}. Excluir dos investimentos?`)) return;
+          await db.deleteInvestimento(i.id);
+        } else {
+          const atual = +f.preco_atual.value || 0;
+          await db.saveInvestimento({ id: i.id, nome: ticker, tipo: 'Ações / FIIs', instituicao: f.instituicao.value, data_aplicacao: f.data_aplicacao.value,
+            objetivo: f.classe.value, ticker, quantidade: q, preco_medio: Math.round(pm * 10000) / 10000,
+            preco_atual: atual || '', cotado_em: atual && atual === i.preco_atual ? i.cotado_em : null,
+            valor_aplicado: Math.round(q * pm * 100) / 100, valor_atual: Math.round(q * (atual || pm) * 100) / 100 });
+        }
+      }
+      modal.close();
+      S.invs = await db.listInvestimentos();
+      render();
+      // cadastro novo sem preço: busca a cotação logo em seguida
+      if (!temAtivo && !(+f.preco_atual.value)) atualizarCotacoesTela(true);
+    } catch (e) { err.textContent = e.message; }
+  });
+  modal.showModal();
+  if (!temAtivo) f.ticker.focus();
 }
 
 // ---------------- Calculadoras ----------------
@@ -1173,8 +1325,13 @@ export default {
       tetoForm(b.dataset.cat);
     } else if (a === 'novo-i') {
       invForm({ tipo: TIPOS_INV[0] });
+    } else if (a === 'nova-acao') {
+      acaoForm();
+    } else if (a === 'cotar-i') {
+      atualizarCotacoesTela();
     } else if (a === 'edit-i') {
-      invForm(S.invs.find((i) => i.id === +b.dataset.id));
+      const inv = S.invs.find((i) => i.id === +b.dataset.id);
+      if (ehBolsa(inv)) acaoForm(inv); else invForm(inv);
     } else if (a === 'del-i') {
       const i = S.invs.find((x) => x.id === +b.dataset.id);
       if (confirm(`Excluir "${i.nome}"?`)) { await db.deleteInvestimento(i.id); S.invs = await db.listInvestimentos(); render(); }
