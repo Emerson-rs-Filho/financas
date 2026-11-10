@@ -7,6 +7,7 @@ App web para gerenciar a casa. Depois do login aparece a tela inicial com as **�
 - **Lista de compras** — compartilhada entre vocês dois, atualiza na hora nos dois celulares e recebe itens pela Alexa ("Alexa, peça à nossa casa para adicionar leite").
 - **Reparos e melhorias** — o que consertar ou melhorar na casa, por cômodo e prioridade, com fotos de antes e depois.
 - **Documentos e garantias** — notas fiscais, garantias, seguros e contratos com a foto ou o PDF, e aviso antes de vencer.
+- **Tarefas da casa** — o que se repete (trocar o filtro, limpar o ar-condicionado, dedetizar), com a próxima data calculada sozinha.
 
 Tem modo claro e escuro, funciona no celular e no computador, e o login é com e-mail e senha.
 
@@ -174,6 +175,16 @@ Os meses do ano corrente que ainda não fecharam aparecem como previsão (tracej
 - **Abrir o arquivo:** o app gera um link que vale 5 minutos. Os arquivos ficam num espaço privado do Supabase, que só quem está logado acessa.
 - No modo demonstração o arquivo não é guardado, só os dados.
 
+### Tarefas da casa
+
+> Já usa o app? Rode de novo o `supabase/schema.sql`: ele cria as tabelas `rotinas` e `rotinas_feitas`.
+
+- **Nova:** o que fazer, de quanto em quanto tempo (dias, semanas, meses ou anos), a próxima data, onde e quem costuma fazer. *Sugestões* traz uma lista pronta para marcar.
+- **Lista:** atrasadas primeiro, depois as dos próximos 7 dias e as demais.
+- **Feito:** registra quem fez e quando, e agenda a próxima vez contando a partir de hoje.
+- Toque na tarefa para editar, pausar, ver as últimas vezes ou desfazer a última.
+- Reparos é para o que se faz uma vez; aqui fica o que volta sempre.
+
 ### Calendário
 
 - **Agendas:** toque em *conectar Google Agenda* e autorize. Depois, em cada agenda, marque:
@@ -200,6 +211,7 @@ js/compras/           módulo Lista de compras (itens.js entende "2 leite, pão 
 js/calendario/        módulo Calendário (agenda, mês, agendas conectadas)
 js/reparos/           módulo Reparos e melhorias (com fotos no Storage)
 js/documentos/        módulo Documentos e garantias (arquivos no Storage)
+js/rotina/            módulo Tarefas da casa (o que se repete)
 supabase/functions/google-auth/  conecta/desconecta a conta Google (OAuth)
 supabase/functions/agenda/       sincroniza, cria e exclui eventos no Google Agenda
 supabase/functions/_shared/      código comum das duas (tokens cifrados, Calendar API)

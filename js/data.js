@@ -270,7 +270,7 @@ export async function cotacoes(params) {
 }
 
 export function resetDemo() {
-  demo = { user: demo.user, lancamentos: seedLancamentos(), investimentos: [], compras: demo.compras || [], compras_fechamentos: demo.compras_fechamentos, cal: demo.cal, reparos: demo.reparos, reparos_fotos: demo.reparos_fotos, documentos: demo.documentos, nextId: Math.max(100000, demo.nextId || 0) };
+  demo = { user: demo.user, lancamentos: seedLancamentos(), investimentos: [], compras: demo.compras || [], compras_fechamentos: demo.compras_fechamentos, cal: demo.cal, reparos: demo.reparos, reparos_fotos: demo.reparos_fotos, documentos: demo.documentos, rotinas: demo.rotinas, rotinas_feitas: demo.rotinas_feitas, nextId: Math.max(100000, demo.nextId || 0) };
   demoSave();
 }
 
@@ -581,6 +581,80 @@ export async function urlDocumento(d) {
   const { data, error } = await c.storage.from(BUCKET_DOCS).createSignedUrl(d.arquivo_path, 300);
   if (error) throw error;
   return data.signedUrl;
+}
+
+// ---------- tarefas da casa (rotina: o que se repete) ----------
+export async function listRotinas() {
+  if (DEMO) return { rotinas: demoArr('rotinas').slice(), feitas: demoArr('rotinas_feitas').slice() };
+  const c = await client();
+  const [r, f] = await Promise.all([
+    c.from('rotinas').select('*').order('id'),
+    c.from('rotinas_feitas').select('*').order('id', { ascending: false }).limit(500),
+  ]);
+  if (r.error) throw semTabela(r.error, 'rotinas');
+  if (f.error) throw semTabela(f.error, 'rotinas_feitas');
+  return { rotinas: r.data, feitas: f.data };
+}
+
+export async function salvarRotina(r) {
+  const row = { titulo: r.titulo.trim(), area: (r.area || '').trim() || null, cada: +r.cada || 1, unidade: r.unidade, proxima: r.proxima,
+    responsavel: (r.responsavel || '').trim() || null, observacao: (r.observacao || '').trim() || null, ativa: r.ativa !== false };
+  if (DEMO) {
+    const a = demoArr('rotinas');
+    if (r.id) Object.assign(a.find((x) => x.id === +r.id), row); else a.push({ id: demo.nextId++, ...row, criado_em: new Date().toISOString() });
+    demoSave();
+    return;
+  }
+  const c = await client();
+  const { error } = r.id ? await c.from('rotinas').update(row).eq('id', r.id) : await c.from('rotinas').insert(row);
+  if (error) throw semTabela(error, 'rotinas');
+}
+
+export async function salvarRotinas(lista) {
+  for (const r of lista) await salvarRotina(r);
+}
+
+export async function excluirRotina(id) {
+  if (DEMO) {
+    demo.rotinas = demoArr('rotinas').filter((x) => x.id !== +id);
+    demo.rotinas_feitas = demoArr('rotinas_feitas').filter((x) => x.rotina_id !== +id);
+    demoSave();
+    return;
+  }
+  const c = await client();
+  const { error } = await c.from('rotinas').delete().eq('id', id);
+  if (error) throw error;
+}
+
+// Marca como feita: registra quem e quando, e empurra a próxima data.
+export async function fazerRotina(r, { feito_em, feito_por, proxima }) {
+  const feita = { rotina_id: r.id, feito_em, feito_por: feito_por || null, proxima_anterior: r.proxima };
+  if (DEMO) {
+    demoArr('rotinas_feitas').unshift({ id: demo.nextId++, ...feita, criado_em: new Date().toISOString() });
+    demoArr('rotinas').find((x) => x.id === r.id).proxima = proxima;
+    demoSave();
+    return;
+  }
+  const c = await client();
+  const { error } = await c.from('rotinas_feitas').insert(feita);
+  if (error) throw semTabela(error, 'rotinas_feitas');
+  const { error: e2 } = await c.from('rotinas').update({ proxima }).eq('id', r.id);
+  if (e2) throw e2;
+}
+
+// Desfaz a última vez: apaga o registro e devolve a data que estava antes.
+export async function desfazerRotina(feita) {
+  if (DEMO) {
+    demo.rotinas_feitas = demoArr('rotinas_feitas').filter((x) => x.id !== feita.id);
+    const r = demoArr('rotinas').find((x) => x.id === feita.rotina_id);
+    if (r && feita.proxima_anterior) r.proxima = feita.proxima_anterior;
+    demoSave();
+    return;
+  }
+  const c = await client();
+  const { error } = await c.from('rotinas_feitas').delete().eq('id', feita.id);
+  if (error) throw error;
+  if (feita.proxima_anterior) await c.from('rotinas').update({ proxima: feita.proxima_anterior }).eq('id', feita.rotina_id);
 }
 
 // ---------- calendário (Google Agenda, via Edge Functions "google-auth" e "agenda") ----------
