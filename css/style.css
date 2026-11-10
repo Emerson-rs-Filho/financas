@@ -526,3 +526,22 @@ a.brand { text-decoration: none; color: var(--text); }
 .acao-total { margin: 0; font-size: 13px; line-height: 1.5; min-height: 1.5em; }
 .link-btn { border: 0; background: none; padding: 0; color: var(--inc); font: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .grid2 > .field[hidden] { display: none; }
+
+/* ---------- calculadora de dividendos ---------- */
+.dv-tab { display: flex; flex-direction: column; gap: 6px; }
+.dv-row { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1.1fr) minmax(0, 1fr) 32px; gap: 6px; align-items: center; }
+.dv-head span { font-size: 11px; color: var(--muted); line-height: 1.2; }
+.dv-row input { min-width: 0; width: 100%; min-height: 42px; padding: 0 10px; border-radius: 12px; border: 1px solid transparent; background: var(--surface-2); color: var(--text); font: inherit; font-size: 15px; }
+.dv-row input:focus { outline: 2px solid var(--inc); outline-offset: 0; }
+.dv-row .dv-t { text-transform: uppercase; font-weight: 600; }
+.dv-x { width: 32px; height: 32px; border: 0; border-radius: 10px; background: transparent; color: var(--muted); display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.dv-x:hover { background: var(--surface-2); color: var(--text); }
+@media (max-width: 640px) {
+  .dv-row { grid-template-columns: repeat(3, minmax(0, 1fr)) 32px; row-gap: 6px; }
+  .dv-row[data-i] { padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+  .dv-row .dv-t { grid-column: 1 / 4; grid-row: 1; }
+  .dv-row .dv-x { grid-column: 4; grid-row: 1; }
+  .dv-row .dv-q, .dv-row .dv-d, .dv-row .dv-p { grid-row: 2; }
+  .dv-head span:first-child { display: none; }
+  .dv-head span:nth-child(2) { grid-column: 1; }
+}

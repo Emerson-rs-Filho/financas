@@ -148,6 +148,7 @@ Depois de entrar, escolha a área na tela inicial. Para trocar de área: no comp
   - **Projeção:** juros compostos com aportes mensais.
   - **Histórico:** "e se eu tivesse investido em PETR4.SA, BOVA11.SA, BTC-BRL… desde 2020?", comparado com o CDI.
   - **Renda fixa:** CDB × LCI/LCA × Tesouro Selic × poupança, já descontando o IR.
+  - **Dividendos:** começa com as ações/FIIs de Investimentos e busca quanto cada cota pagou nos últimos 12 meses (dá para ajustar à mão ou simular outros tickers). Mostra a renda mensal da carteira hoje e, para uma renda desejada: quanto a carteira precisa valer, quantas cotas de cada ativo comprar (mantendo a proporção ou num ativo só) e em quanto tempo chega aportando todo mês, com ou sem reinvestir. Precisa da função `cotacoes` publicada de novo (Passo 3).
 - **Dicas:** sugestões geradas pelos próprios dados, como contas que subiram, contas que oscilam, custos anuais concentrados e meses no vermelho.
 
 Os meses do ano corrente que ainda não fecharam aparecem como previsão (tracejado) e não entram nas médias.

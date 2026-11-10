@@ -273,6 +273,24 @@ export async function cotacoesAtuais(tickers) {
   return cotacoes({ tipo: 'precos', tickers: lista.join(',') });
 }
 
+// Preço e dividendos por cota nos últimos 12 meses. Devolve { ativos: { MXRF11: { preco, div12m, pagamentos } }, erros }.
+export async function dividendos(tickers) {
+  const lista = [...new Set(tickers.map((t) => String(t).trim().toUpperCase()).filter(Boolean))];
+  if (!lista.length) return { ativos: {}, erros: [] };
+  if (DEMO) {
+    // valores fictícios estáveis: o mesmo preço de cotacoesAtuais e DY entre 6% e 12% ao ano
+    const { precos } = await cotacoesAtuais(lista);
+    const ativos = {};
+    lista.forEach((t) => {
+      const h = [...t].reduce((s, ch) => (s * 17 + ch.charCodeAt(0)) % 1000, 3) / 1000;
+      const preco = precos[t];
+      ativos[t] = { preco, div12m: Math.round(preco * (0.06 + h * 0.06) * 100) / 100, pagamentos: /11$/.test(t) ? 12 : 4 };
+    });
+    return { ativos, erros: [], exemplo: true };
+  }
+  return cotacoes({ tipo: 'dividendos', tickers: lista.join(',') });
+}
+
 // Grava o preço atual de cada ativo e o valor atual (quantidade × preço).
 export async function atualizarCotacoes(invs, precos) {
   const agora = new Date().toISOString();

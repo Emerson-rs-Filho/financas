@@ -94,3 +94,72 @@ export function rendaFixa({ valor, dias, tipo, cdi, pct = 1, selic = cdi, trMens
 
 /** % do CDI que um CDB precisa pagar para empatar com uma LCI/LCA isenta de `pctIsento` no mesmo prazo. */
 export const cdbEquivalente = (pctIsento, dias) => pctIsento / (1 - aliquotaIR(dias));
+
+// ---------------- dividendos (ações e FIIs) ----------------
+
+/**
+ * Renda de uma carteira de ativos que pagam dividendos.
+ * ativos: [{ ticker, qtd, preco, div12m }] (div12m = quanto cada cota pagou nos últimos 12 meses).
+ */
+export function rendaCarteira(ativos) {
+  const linhas = ativos.map((a) => {
+    const qtd = Math.max(0, +a.qtd || 0), preco = Math.max(0, +a.preco || 0), div = Math.max(0, +a.div12m || 0);
+    const valor = qtd * preco, ano = qtd * div;
+    return { ...a, qtd, preco, div12m: div, valor, rendaAno: ano, rendaMes: ano / 12, dy: preco ? div / preco : 0 };
+  });
+  const valor = linhas.reduce((s, l) => s + l.valor, 0);
+  const rendaAno = linhas.reduce((s, l) => s + l.rendaAno, 0);
+  return { linhas, valor, rendaAno, rendaMes: rendaAno / 12, dy: valor ? rendaAno / valor : 0 };
+}
+
+/**
+ * Quanto falta para a carteira pagar `rendaMes` por mês, no rendimento atual.
+ * - total: valor que a carteira precisa ter; falta: quanto investir a mais;
+ * - proporcao: cotas a comprar de cada ativo mantendo o peso de hoje na carteira;
+ * - unico: cotas de um só ativo que, sozinhas, fechariam o que falta de renda.
+ */
+export function metaRenda({ ativos, rendaMes }) {
+  const c = rendaCarteira(ativos);
+  const alvoAno = Math.max(0, +rendaMes || 0) * 12;
+  const faltaAno = Math.max(0, alvoAno - c.rendaAno);
+  const total = c.dy ? alvoAno / c.dy : 0;
+  const falta = c.dy ? faltaAno / c.dy : 0;
+  const pagam = c.linhas.filter((l) => l.preco > 0 && l.div12m > 0);
+  // se ninguém tem cota ainda, divide igualmente entre os ativos que pagam
+  const base = pagam.reduce((s, l) => s + l.valor, 0);
+  const proporcao = pagam.map((l) => {
+    const peso = base ? l.valor / base : 1 / pagam.length;
+    const cotas = faltaAno ? Math.ceil((falta * peso) / l.preco) : 0;
+    return { ticker: l.ticker, peso, cotas, custo: cotas * l.preco, rendaMes: (cotas * l.div12m) / 12 };
+  });
+  const unico = pagam.map((l) => {
+    const cotas = faltaAno ? Math.ceil(faltaAno / l.div12m) : 0;
+    return { ticker: l.ticker, cotas, custo: cotas * l.preco, dy: l.dy };
+  }).sort((a, b) => a.custo - b.custo);
+  return { atual: c, alvoAno, faltaAno, total, falta, jaAtinge: alvoAno > 0 && faltaAno === 0, proporcao, unico };
+}
+
+/**
+ * Mês a mês até a renda mensal chegar a `rendaMes` (no máximo `maxMeses`).
+ * O dividendo do mês é valor × DY / 12; com `reinvestir` ele compra mais cotas.
+ * serie: [{ mes, saldo, investido, renda }] (formato do gráfico das outras calculadoras).
+ */
+export function tempoAteRenda({ valorInicial = 0, dyAA, aporte = 0, rendaMes, reinvestir = true, valorizacaoAA = 0, maxMeses = 600 }) {
+  const dyM = Math.max(0, +dyAA || 0) / 12;
+  const v = Math.pow(1 + (+valorizacaoAA || 0), 1 / 12) - 1;
+  let saldo = Math.max(0, +valorInicial || 0), investido = saldo, recebido = 0;
+  const serie = [{ mes: 0, saldo, investido, renda: saldo * dyM }];
+  const alvo = Math.max(0, +rendaMes || 0);
+  if (!alvo || saldo * dyM >= alvo) return { meses: 0, chegou: true, serie, recebido };
+  if (!dyM) return { meses: null, chegou: false, serie, recebido };
+  for (let m = 1; m <= maxMeses; m++) {
+    const div = saldo * dyM;
+    recebido += div;
+    saldo = saldo * (1 + v) + aporte + (reinvestir ? div : 0);
+    investido += aporte;
+    const renda = saldo * dyM;
+    serie.push({ mes: m, saldo, investido, renda });
+    if (renda >= alvo) return { meses: m, chegou: true, serie, recebido };
+  }
+  return { meses: null, chegou: false, serie, recebido };
+}

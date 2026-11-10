@@ -634,7 +634,7 @@ function acaoForm(i = {}) {
 }
 
 // ---------------- Calculadoras ----------------
-const CALCS = [['meta', 'Meta', 'quanto guardar'], ['projecao', 'Projeção', 'juros compostos'], ['historico', 'Histórico', 'ativo real'], ['rendafixa', 'Renda fixa', 'CDB × LCI × Tesouro']];
+const CALCS = [['meta', 'Meta', 'quanto guardar'], ['projecao', 'Projeção', 'juros compostos'], ['historico', 'Histórico', 'ativo real'], ['rendafixa', 'Renda fixa', 'CDB × LCI × Tesouro'], ['dividendos', 'Dividendos', 'ações e FIIs']];
 const TICKERS = [['PETR4.SA', 'Petrobras'], ['VALE3.SA', 'Vale'], ['ITUB4.SA', 'Itaú'], ['BBAS3.SA', 'Banco do Brasil'], ['WEGE3.SA', 'WEG'],
   ['BOVA11.SA', 'ETF Ibovespa'], ['IVVB11.SA', 'ETF S&P 500 em reais'], ['HGLG11.SA', 'FII HGLG11'], ['MXRF11.SA', 'FII MXRF11'],
   ['^BVSP', 'Índice Ibovespa'], ['BTC-BRL', 'Bitcoin em reais'], ['USDBRL=X', 'Dólar'], ['AAPL', 'Apple (em US$)']];
@@ -653,6 +653,7 @@ function calcDefaults(id) {
     projecao: { inicial: 1000, aporte: 500, anos: 10, taxa: cdi },
     historico: { ticker: 'BOVA11.SA', inicio: '2020-01', aporte: 500, inicial: 0 },
     rendafixa: { valor: 10000, dias: 730, cdi, pctCdb: 110, pctLci: 92, selic: S.taxas ? S.taxas.selic.valor : cdi + 0.1 },
+    dividendos: { renda: 1000, aporte: 500, valorizacao: 0, reinvestir: '1' },
   }[id];
 }
 
@@ -721,23 +722,178 @@ function viewCalculadoras(el) {
       ${fld('Prazo (dias corridos)', 'dias', v.dias, 'min="1" step="1"')}
       <div class="grid2">${fld('CDI (% a.a.)', 'cdi', v.cdi, 'min="0"')}${fld('Selic (% a.a.)', 'selic', v.selic, 'min="0"')}</div>
       <div class="grid2">${fld('CDB (% do CDI)', 'pctCdb', v.pctCdb, 'min="0"')}${fld('LCI/LCA (% do CDI)', 'pctLci', v.pctLci, 'min="0"')}</div>`,
+    dividendos: id === 'dividendos' ? divForm(v) : '',
   }[id];
 
   // `salvar` só quando o usuário mexe: assim os padrões ainda acompanham as taxas que chegam depois
   const ler = (salvar) => {
     const o = Object.fromEntries(new FormData(f));
     if (id === 'meta') o.corrigir = f.corrigir.checked ? '1' : '';
+    if (id === 'dividendos') o.reinvestir = f.reinvestir.checked ? '1' : '';
     if (salvar) S.calcIn[id] = o;
     return o;
   };
-  const calcular = (salvar) => ({ meta: outMeta, projecao: outProjecao, historico: outHistorico, rendafixa: outRendaFixa }[id])(ler(salvar), out);
+  const calcular = (salvar) => ({ meta: outMeta, projecao: outProjecao, historico: outHistorico, rendafixa: outRendaFixa, dividendos: outDividendos }[id])(ler(salvar), out);
 
-  f.addEventListener('input', () => { if (id !== 'historico') calcular(true); else ler(true); });
+  f.addEventListener('input', (ev) => {
+    if (id === 'dividendos') lerAtivosDiv(f, ev);
+    if (id !== 'historico') calcular(true); else ler(true);
+  });
+  if (id === 'dividendos') {
+    f.addEventListener('click', (ev) => {
+      const d = divEstado();
+      const del = ev.target.closest('[data-dv-del]');
+      if (del) { lerAtivosDiv(f); d.ativos.splice(+del.dataset.dvDel, 1); if (!d.ativos.length) d.ativos.push({ ticker: '', qtd: 0, preco: '', div12m: '' }); render(); }
+      else if (ev.target.closest('[data-dv-add]')) {
+        lerAtivosDiv(f); d.ativos.push({ ticker: '', qtd: 0, preco: '', div12m: '' }); render();
+        const t = document.querySelectorAll('#dv-tab .dv-t'); if (t.length) t[t.length - 1].focus();
+      } else if (ev.target.closest('[data-dv-buscar]')) { lerAtivosDiv(f); buscarDividendos({ forcar: true }); }
+    });
+    // ticker novo ou trocado: busca só ele
+    f.addEventListener('change', (ev) => { if (ev.target.classList.contains('dv-t')) { lerAtivosDiv(f); const tk = ev.target.value.trim().toUpperCase().replace(/\.SA$/, ''); if (tk) buscarDividendos({ soTicker: tk }); } });
+    if (!divEstado().buscou) buscarDividendos();
+  }
   f.addEventListener('click', (ev) => {
     if (ev.target.closest('[data-usar="cdi"]')) { f.taxa.value = t.cdi.valor; calcular(true); }
   });
   f.addEventListener('submit', (ev) => { ev.preventDefault(); if (id === 'historico') simularAtivo(ler(true), out); });
   if (id === 'historico') outHistorico(v, out); else calcular();
+}
+
+// ---------------- calculadora de dividendos (ações e FIIs) ----------------
+// Começa pelas ações/FIIs cadastradas em Investimentos; recomeça quando a carteira muda.
+const carteiraBolsa = () => {
+  const l = S.invs.filter((i) => i.ticker).map((i) => ({ ticker: i.ticker, qtd: i.quantidade || 0, preco: i.preco_atual || i.preco_medio || '', div12m: '' }));
+  return l.length ? l : [{ ticker: 'MXRF11', qtd: 0, preco: '', div12m: '' }];
+};
+function divEstado() {
+  const assin = S.invs.filter((i) => i.ticker).map((i) => `${i.ticker}:${i.quantidade}`).join('|');
+  if (!S.div || S.div.assin !== assin) S.div = { assin, ativos: carteiraBolsa(), buscou: false, buscando: false, erro: '', exemplo: false };
+  return S.div;
+}
+// Busca preço e dividendos. soTicker: só esse (ativo recém-digitado). forcar: sobrescreve o que foi editado à mão.
+async function buscarDividendos({ forcar = false, soTicker = '' } = {}) {
+  const d = divEstado();
+  const alvo = d.ativos.filter((a) => a.ticker && (!soTicker || a.ticker === soTicker));
+  if (!alvo.length || d.buscando) return;
+  d.buscando = true;
+  if (!soTicker) d.erro = '';
+  if (route() === 'calculadoras' && S.calc === 'dividendos') document.getElementById('dv-status')?.replaceChildren('Buscando dividendos…');
+  try {
+    const r = await db.dividendos(alvo.map((a) => a.ticker));
+    alvo.forEach((a) => {
+      const x = (r.ativos || {})[a.ticker];
+      if (!x) return;
+      if (forcar || soTicker || !a.precoManual) { a.preco = x.preco; a.precoManual = false; }
+      if (forcar || soTicker || !a.divManual) { a.div12m = Math.round(x.div12m * 10000) / 10000; a.divManual = false; }
+      a.pagamentos = x.pagamentos;
+    });
+    const erros = (r.erros || []).filter((t) => alvo.some((a) => a.ticker === t));
+    if (erros.length) d.erro = `Não achei ${erros.join(', ')}. Confira o ticker ou preencha os valores à mão.`;
+    d.exemplo = !!r.exemplo;
+  } catch (e) { d.erro = e.message; }
+  d.buscou = true;
+  d.buscando = false;
+  if (route() === 'calculadoras' && S.calc === 'dividendos') render();
+}
+
+function divForm(v) {
+  const d = divEstado();
+  const status = d.buscando ? 'Buscando dividendos…'
+    : d.erro ? `<span style="color:var(--danger)">${esc(d.erro)}</span>`
+      : d.buscou ? `Dividendos pagos por cota nos últimos 12 meses${d.exemplo ? ' (valores de exemplo, modo demonstração)' : ' (Yahoo Finance)'}. Dá para ajustar à mão.`
+        : '';
+  return `<h2 style="font-size:16px;font-weight:600">Minha carteira</h2>
+    <div class="dv-tab" id="dv-tab">
+      <div class="dv-row dv-head"><span>ativo</span><span>cotas</span><span>R$/cota em 12m</span><span>preço (R$)</span><span></span></div>
+      ${d.ativos.map((a, i) => `<div class="dv-row" data-i="${i}">
+        <input class="dv-t" aria-label="Ticker" value="${esc(a.ticker)}" placeholder="MXRF11" maxlength="12" autocapitalize="characters" autocomplete="off">
+        <input class="dv-q" aria-label="Cotas de ${esc(a.ticker)}" type="number" inputmode="decimal" step="any" min="0" value="${esc(a.qtd)}">
+        <input class="dv-d" aria-label="Dividendos por cota em 12 meses de ${esc(a.ticker)}" type="number" inputmode="decimal" step="any" min="0" value="${esc(a.div12m)}" placeholder="—">
+        <input class="dv-p" aria-label="Preço de ${esc(a.ticker)}" type="number" inputmode="decimal" step="any" min="0" value="${esc(a.preco)}" placeholder="—">
+        <button type="button" class="dv-x" data-dv-del="${i}" aria-label="Tirar ${esc(a.ticker || 'ativo')} da simulação">${ico('fechar', 14)}</button>
+      </div>`).join('')}
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button type="button" class="pill" data-dv-add style="min-height:36px;font-size:13px">${ico('plus', 14)}ativo</button>
+      <button type="button" class="pill" data-dv-buscar style="min-height:36px;font-size:13px">${ico('refresh', 14)}buscar dividendos</button>
+    </div>
+    <p class="muted" id="dv-status" style="font-size:12px;margin:0;line-height:1.5">${status}</p>
+    <h2 style="font-size:16px;font-weight:600;margin-top:6px">Quero receber…</h2>
+    ${fld('Renda por mês (R$)', 'renda', v.renda, 'min="0"')}
+    ${fld('Aporte por mês (R$)', 'aporte', v.aporte, 'min="0"')}
+    ${fld('Valorização das cotas (% ao ano)', 'valorizacao', v.valorizacao, 'step="0.5"')}
+    <label style="display:flex;gap:10px;align-items:center;font-size:14px"><input type="checkbox" name="reinvestir" ${v.reinvestir ? 'checked' : ''}> Reinvestir os dividendos</label>`;
+}
+
+// Lê a tabela de ativos da tela para o estado; marca o que foi editado à mão.
+function lerAtivosDiv(f, ev) {
+  const d = divEstado();
+  f.querySelectorAll('.dv-row[data-i]').forEach((row) => {
+    const a = d.ativos[+row.dataset.i];
+    if (!a) return;
+    a.ticker = row.querySelector('.dv-t').value.trim().toUpperCase().replace(/\.SA$/, '');
+    a.qtd = row.querySelector('.dv-q').value;
+    a.div12m = row.querySelector('.dv-d').value;
+    a.preco = row.querySelector('.dv-p').value;
+  });
+  const alvo = ev && ev.target;
+  if (alvo && alvo.closest && alvo.closest('.dv-row[data-i]')) {
+    const a = d.ativos[+alvo.closest('.dv-row').dataset.i];
+    if (alvo.classList.contains('dv-d')) a.divManual = true;
+    if (alvo.classList.contains('dv-p')) a.precoManual = true;
+  }
+}
+
+const anosMeses = (m) => {
+  const a = Math.floor(m / 12), r = m % 12;
+  return [a ? `${a} ${a === 1 ? 'ano' : 'anos'}` : '', r ? `${r} ${r === 1 ? 'mês' : 'meses'}` : ''].filter(Boolean).join(' e ') || 'agora';
+};
+const cotasTxt = (n) => `${Math.round(n).toLocaleString('pt-BR')} ${Math.round(n) === 1 ? 'cota' : 'cotas'}`;
+
+function outDividendos(v, out) {
+  const d = divEstado();
+  const ativos = d.ativos.filter((a) => a.ticker);
+  const m = calc.metaRenda({ ativos, rendaMes: num(v.renda) });
+  const c = m.atual;
+  if (!c.dy) {
+    out.innerHTML = `<div class="empty">${d.buscando ? 'Buscando os dividendos…'
+      : 'Preencha quanto cada cota pagou nos últimos 12 meses e o preço, ou toque em <strong>buscar dividendos</strong>.'}</div>`;
+    setCalcChart(null);
+    return;
+  }
+  const t = calc.tempoAteRenda({ valorInicial: c.valor, dyAA: c.dy, aporte: num(v.aporte), rendaMes: num(v.renda),
+    reinvestir: !!v.reinvestir, valorizacaoAA: num(v.valorizacao) / 100 });
+  const meta = num(v.renda);
+  const linhas = c.linhas.filter((l) => l.ticker);
+  out.innerHTML = `
+    <div class="feature" style="display:block;margin:0">
+      <div class="eyebrow">Renda da carteira hoje</div>
+      <div class="hero-num num" style="font-size:clamp(40px,6vw,64px);color:var(--inc)">${brl(c.rendaMes, 2)}<span style="font-size:.4em;color:var(--muted)">/mês</span></div>
+      <p class="muted" style="font-size:14px;line-height:1.6;margin:10px 0 0">${brl(c.rendaAno, 2)} por ano sobre ${brl(c.valor)} investidos · rendimento médio de <strong style="color:var(--text)">${pctBr(c.dy, 1)} ao ano</strong>.</p>
+    </div>
+    <div class="card"><div class="list">${linhas.map((l) => `<div class="li"><div class="li-main"><span class="li-t">${esc(l.ticker)} <small class="muted">${cotasTxt(l.qtd)}</small></span>
+      <span class="li-s">${l.div12m ? `${brl(l.div12m, 2)} por cota em 12 meses · ${pctBr(l.dy, 1)} ao ano${l.pagamentos ? ` · ${l.pagamentos} ${l.pagamentos === 1 ? 'pagamento' : 'pagamentos'}` : ''}` : 'sem dividendos informados'}</span></div>
+      <div class="li-v num">${brl(l.rendaMes, 2)}<small>por mês</small></div></div>`).join('')}</div></div>
+    ${meta ? (m.jaAtinge
+      ? `<div class="card"><p style="margin:0;font-size:15px;line-height:1.6">A carteira já rende <strong>${brl(c.rendaMes, 2)}/mês</strong>, acima da meta de ${brl(meta)}. 🎉</p></div>`
+      : `<div class="kpis">${kpi(`Carteira para ${brl(meta)}/mês`, brl(m.total))}${kpi('Falta investir', brl(m.falta), 'var(--inc)')}${kpi('Você tem', brl(c.valor))}</div>
+    <div class="card">
+      <div class="tile-head"><h2>cotas a comprar</h2><span class="muted" style="font-size:12px">mantendo a proporção da carteira</span></div>
+      <div class="list">${m.proporcao.filter((p) => p.cotas).map((p) => `<div class="li"><div class="li-main"><span class="li-t">${esc(p.ticker)}</span><span class="li-s">${Math.round(p.peso * 100)}% da carteira · +${brl(p.rendaMes, 2)}/mês</span></div>
+        <div class="li-v num">${cotasTxt(p.cotas)}<small>${brl(p.custo)}</small></div></div>`).join('')}</div>
+      ${m.unico.length > 1 ? `<p class="muted" style="font-size:13px;line-height:1.6;margin:12px 0 0">Ou num ativo só: ${m.unico.map((u) => `<strong style="color:var(--text)">${esc(u.ticker)}</strong> ${cotasTxt(u.cotas)} (${brl(u.custo)})`).join(' · ')}.</p>` : ''}
+    </div>
+    <div class="card">
+      <div class="tile-head"><h2>em quanto tempo</h2></div>
+      <p style="margin:0;font-size:15px;line-height:1.6">${t.chegou
+        ? `Aportando <strong>${brl(num(v.aporte))}/mês</strong>${v.reinvestir ? ' e reinvestindo os dividendos' : ''}, a carteira chega a ${brl(meta)}/mês em <strong style="color:var(--inc)">${anosMeses(t.meses)}</strong>.
+          <span class="muted">Você terá aportado ${brl(t.serie.at(-1).investido - c.valor)} e recebido ${brl(t.recebido)} em dividendos no caminho.</span>`
+        : `Com esse aporte${v.reinvestir ? '' : ' e sem reinvestir'}, a meta não chega em 50 anos. Aumente o aporte${v.reinvestir ? '' : ' ou marque <strong>reinvestir os dividendos</strong>'}.`}</p>
+    </div>`) : ''}
+    <p class="muted" style="font-size:12px;line-height:1.6;margin:0">Projeção com base no que cada cota pagou nos últimos 12 meses: dividendos passados não garantem os futuros. Rendimentos de FIIs e dividendos de ações são isentos de IR para pessoa física; JCP tem 15% retido na fonte.</p>`;
+  if (meta && !m.jaAtinge && t.chegou && t.meses > 0) serieChart(out, t.serie);
+  else setCalcChart(null);
 }
 
 function serieChart(out, serie, rotulos) {

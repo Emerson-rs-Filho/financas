@@ -1,5 +1,6 @@
 // Edge Function "cotacoes": proxy para Yahoo Finance e Banco Central (SGS).
 // tipo=precos&tickers=WIZC3,MXRF11 devolve o preço atual de cada ativo da B3.
+// tipo=dividendos&tickers=... devolve o preço e quanto cada cota pagou nos últimos 12 meses.
 // Só usuários logados no app podem chamar. Deploy:
 //   npx supabase functions deploy cotacoes --no-verify-jwt
 import { createClient } from 'jsr:@supabase/supabase-js@2';
@@ -97,6 +98,28 @@ async function precos(tickers: string[]) {
   return { precos: out, erros };
 }
 
+// Dividendos pagos por cota nos últimos 12 meses (ações e FIIs da B3) e o preço atual.
+async function dividendoAtivo(ticker: string) {
+  const simbolo = ticker.includes('.') || ticker.startsWith('^') ? ticker : `${ticker}.SA`;
+  const d = await getJson(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(simbolo)}?range=1y&interval=1mo&events=div`);
+  const r = d?.chart?.result?.[0];
+  const preco = Number(r?.meta?.regularMarketPrice);
+  if (!(preco > 0)) throw new Error('sem preço');
+  const desde = Date.now() / 1000 - 365 * 86400;
+  const pagos = Object.values(r?.events?.dividends ?? {}) as { amount: number; date: number }[];
+  const validos = pagos.filter((p) => p.date >= desde && p.amount > 0);
+  return { preco, div12m: validos.reduce((s, p) => s + Number(p.amount), 0), pagamentos: validos.length };
+}
+
+async function dividendos(tickers: string[]) {
+  const ativos: Record<string, { preco: number; div12m: number; pagamentos: number }> = {};
+  const erros: string[] = [];
+  await Promise.all(tickers.map(async (t) => {
+    try { ativos[t] = await cached('d:' + t, () => dividendoAtivo(t)); } catch { erros.push(t); }
+  }));
+  return { ativos, erros };
+}
+
 // ---------- handler ----------
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
@@ -123,12 +146,17 @@ Deno.serve(async (req) => {
       if (!DATA.test(inicio)) return json({ error: 'Data inválida.' }, 400);
       return json(await cached(`h:${ticker}:${inicio}`, () => historico(ticker, inicio)));
     }
+    if (tipo === 'dividendos') {
+      const lista = [...new Set((q.get('tickers') || '').toUpperCase().split(',').map((t) => t.trim()).filter(Boolean))];
+      if (!lista.length || lista.length > 30 || !lista.every((t) => TICKER.test(t))) return json({ error: 'Tickers inválidos.' }, 400);
+      return json(await dividendos(lista));
+    }
     if (tipo === 'precos') {
       const lista = [...new Set((q.get('tickers') || '').toUpperCase().split(',').map((t) => t.trim()).filter(Boolean))];
       if (!lista.length || lista.length > 30 || !lista.every((t) => TICKER.test(t))) return json({ error: 'Tickers inválidos.' }, 400);
       return json(await precos(lista));
     }
-    return json({ error: 'Use tipo=taxas, historico, cdi_mensal ou precos.' }, 400);
+    return json({ error: 'Use tipo=taxas, historico, cdi_mensal, precos ou dividendos.' }, 400);
   } catch (e) {
     return json({ error: (e as Error).message }, 502);
   }
