@@ -17,6 +17,8 @@ export const MODULOS = [
     load: () => import('./rotina/index.js').then((m) => m.default) },
   { id: 'cardapio', nome: 'Cardápio da semana', desc: 'O que vai ter no almoço e no jantar, com os ingredientes indo para a lista', icone: 'cardapio', status: 'ativo',
     load: () => import('./cardapio/index.js').then((m) => m.default) },
+  { id: 'metas', nome: 'Metas e sonhos', desc: 'Viagem, reforma, reserva: quanto falta e quanto guardar por mês', icone: 'metas', status: 'ativo',
+    load: () => import('./metas/index.js').then((m) => m.default) },
 ];
 
 export const modulo = (id) => MODULOS.find((m) => m.id === id);

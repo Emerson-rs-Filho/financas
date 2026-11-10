@@ -496,3 +496,19 @@ a.brand { text-decoration: none; color: var(--text); }
   .cd-dias { grid-template-columns: 1fr; }
   .cd-acoes .btn { flex: 1 1 100%; }
 }
+
+/* ---------- metas e sonhos ---------- */
+.mt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.mt-card { display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
+.mt-main { display: flex; flex-direction: column; gap: 8px; width: 100%; text-align: left; border: 0; background: none; color: var(--text); font: inherit; padding: 0; cursor: pointer; min-width: 0; }
+.mt-top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.mt-nome { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mt-pct { font-size: 15px; font-weight: 700; }
+.mt-card .track { display: block; height: 10px; }
+.mt-bar { display: block; height: 100%; border-radius: 99px; background: var(--bar); }
+.mt-bar.hi, .mt-card.ok .mt-bar { background: var(--lime); }
+.mt-val { font-size: 14px; }
+.mt-sub { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 4px; }
+.mt-sub.neg { color: var(--danger); }
+.mt-hist { max-height: 38vh; overflow: auto; }
+@media (max-width: 640px) { .mt-grid { grid-template-columns: 1fr; } }

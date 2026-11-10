@@ -50,6 +50,7 @@ export const IC = {
   rotina: 'M17 2l4 4-4 4M3 11V9a4 4 0 0 1 4-4h14M7 22l-4-4 4-4M21 13v2a4 4 0 0 1-4 4H3',
   check: 'M5 12l5 5 9-10',
   cardapio: 'M7 2v8a2.5 2.5 0 0 0 5 0V2M9.5 2v20M19 22V2c-2.5 1-4 4-4 8v3h4',
+  metas: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM12 12h.01',
   camera: 'M3 8h4l2-3h6l2 3h4v12H3zM12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
 };
 export const ico = (k, s = 20) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${IC[k] || IC.inicio}"></path></svg>`;

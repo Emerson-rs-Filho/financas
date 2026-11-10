@@ -9,6 +9,7 @@ App web para gerenciar a casa. Depois do login aparece a tela inicial com as **�
 - **Documentos e garantias** — notas fiscais, garantias, seguros e contratos com a foto ou o PDF, e aviso antes de vencer.
 - **Tarefas da casa** — o que se repete (trocar o filtro, limpar o ar-condicionado, dedetizar), com a próxima data calculada sozinha.
 - **Cardápio da semana** — almoço e jantar de cada dia, com os ingredientes indo para a lista de compras.
+- **Metas e sonhos** — viagem, reforma, reserva: quanto já foi guardado, quanto falta e quanto guardar por mês.
 
 Tem modo claro e escuro, funciona no celular e no computador, e o login é com e-mail e senha.
 
@@ -195,6 +196,15 @@ Os meses do ano corrente que ainda não fecharam aparecem como previsão (tracej
 - **Mandar ingredientes para a lista:** junta os ingredientes da semana (de hoje em diante), você desmarca o que já tem em casa e o resto vai para a Lista de compras, sem repetir o que já está lá.
 - As setas mudam de semana, para planejar a próxima ou rever as anteriores.
 
+### Metas e sonhos
+
+> Já usa o app? Rode de novo o `supabase/schema.sql`: ele cria as tabelas `metas` e `metas_aportes`.
+
+- **Nova meta:** nome, quanto custa e, se quiser, para quando. Com prazo, o app calcula quanto guardar por mês.
+- **Guardar:** anote cada valor guardado (ou retirado). Isso só acompanha a meta; não cria lançamento em Finanças.
+- **Ligar a um investimento:** escolha um investimento de Finanças e o guardado passa a ser o valor atual dele, sem anotar nada à mão.
+- Toque na meta para ver o histórico, editar ou excluir.
+
 ### Calendário
 
 - **Agendas:** toque em *conectar Google Agenda* e autorize. Depois, em cada agenda, marque:
@@ -223,6 +233,7 @@ js/reparos/           módulo Reparos e melhorias (com fotos no Storage)
 js/documentos/        módulo Documentos e garantias (arquivos no Storage)
 js/rotina/            módulo Tarefas da casa (o que se repete)
 js/cardapio/          módulo Cardápio da semana
+js/metas/             módulo Metas e sonhos
 supabase/functions/google-auth/  conecta/desconecta a conta Google (OAuth)
 supabase/functions/agenda/       sincroniza, cria e exclui eventos no Google Agenda
 supabase/functions/_shared/      código comum das duas (tokens cifrados, Calendar API)

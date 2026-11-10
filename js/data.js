@@ -270,7 +270,7 @@ export async function cotacoes(params) {
 }
 
 export function resetDemo() {
-  demo = { user: demo.user, lancamentos: seedLancamentos(), investimentos: [], compras: demo.compras || [], compras_fechamentos: demo.compras_fechamentos, cal: demo.cal, reparos: demo.reparos, reparos_fotos: demo.reparos_fotos, documentos: demo.documentos, rotinas: demo.rotinas, rotinas_feitas: demo.rotinas_feitas, cardapio: demo.cardapio, nextId: Math.max(100000, demo.nextId || 0) };
+  demo = { user: demo.user, lancamentos: seedLancamentos(), investimentos: [], compras: demo.compras || [], compras_fechamentos: demo.compras_fechamentos, cal: demo.cal, reparos: demo.reparos, reparos_fotos: demo.reparos_fotos, documentos: demo.documentos, rotinas: demo.rotinas, rotinas_feitas: demo.rotinas_feitas, cardapio: demo.cardapio, metas: demo.metas, metas_aportes: demo.metas_aportes, nextId: Math.max(100000, demo.nextId || 0) };
   demoSave();
 }
 
@@ -682,6 +682,58 @@ export async function salvarCardapio({ dia, refeicao, prato, ingredientes }) {
     ? await c.from('cardapio').upsert(row, { onConflict: 'dia,refeicao' })
     : await c.from('cardapio').delete().eq('dia', dia).eq('refeicao', refeicao);
   if (error) throw semTabela(error, 'cardapio');
+}
+
+// ---------- metas e sonhos ----------
+export async function listMetas() {
+  if (DEMO) return { metas: demoArr('metas').slice(), aportes: demoArr('metas_aportes').slice() };
+  const c = await client();
+  const [m, a] = await Promise.all([c.from('metas').select('*').order('id'), c.from('metas_aportes').select('*').order('id')]);
+  if (m.error) throw semTabela(m.error, 'metas');
+  if (a.error) throw semTabela(a.error, 'metas_aportes');
+  return { metas: m.data.map((x) => ({ ...x, valor_alvo: Number(x.valor_alvo) })), aportes: a.data.map((x) => ({ ...x, valor: Number(x.valor) })) };
+}
+
+export async function salvarMeta(m) {
+  const row = { nome: m.nome.trim(), valor_alvo: +m.valor_alvo, prazo: m.prazo || null, investimento_id: +m.investimento_id || null,
+    observacao: (m.observacao || '').trim() || null };
+  if (DEMO) {
+    const a = demoArr('metas');
+    if (m.id) Object.assign(a.find((x) => x.id === +m.id), row); else a.push({ id: demo.nextId++, ...row, criado_em: new Date().toISOString() });
+    demoSave();
+    return;
+  }
+  const c = await client();
+  const { error } = m.id ? await c.from('metas').update(row).eq('id', m.id) : await c.from('metas').insert(row);
+  if (error) throw semTabela(error, 'metas');
+}
+
+export async function excluirMeta(id) {
+  if (DEMO) {
+    demo.metas = demoArr('metas').filter((x) => x.id !== +id);
+    demo.metas_aportes = demoArr('metas_aportes').filter((x) => x.meta_id !== +id);
+    demoSave();
+    return;
+  }
+  const c = await client();
+  const { error } = await c.from('metas').delete().eq('id', id);
+  if (error) throw error;
+}
+
+// valor positivo = guardou; negativo = retirou
+export async function addAporte({ meta_id, data, valor, observacao }) {
+  const row = { meta_id: +meta_id, data, valor: +valor, observacao: (observacao || '').trim() || null };
+  if (DEMO) { demoArr('metas_aportes').push({ id: demo.nextId++, ...row }); demoSave(); return; }
+  const c = await client();
+  const { error } = await c.from('metas_aportes').insert(row);
+  if (error) throw semTabela(error, 'metas_aportes');
+}
+
+export async function excluirAporte(id) {
+  if (DEMO) { demo.metas_aportes = demoArr('metas_aportes').filter((x) => x.id !== +id); demoSave(); return; }
+  const c = await client();
+  const { error } = await c.from('metas_aportes').delete().eq('id', id);
+  if (error) throw error;
 }
 
 // ---------- calendário (Google Agenda, via Edge Functions "google-auth" e "agenda") ----------
