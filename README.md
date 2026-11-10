@@ -219,6 +219,10 @@ Os meses do ano corrente que ainda não fecharam aparecem como previsão (tracej
 - **Novo evento:** escolha a agenda (as suas compartilhadas e as que a família liberou). Quem criou o evento pelo app, ou o dono da agenda, pode excluí-lo.
 - Para editar um evento, use o Google Agenda. A mudança aparece no app na próxima sincronização.
 
+### Cópia de segurança
+
+Na tela inicial, o botão com a seta para baixo (ao lado do tema) baixa uma planilha do Excel com tudo: lançamentos, investimentos, contas, orçamento, compras, reparos, documentos, tarefas, cardápio e metas, uma aba para cada. O plano grátis do Supabase não faz backup automático, então vale baixar de vez em quando e guardar num lugar seguro. Fotos e arquivos anexados não entram na planilha, e ela não serve para restaurar os dados automaticamente.
+
 ## Estrutura
 
 ```
@@ -229,6 +233,7 @@ js/app.js             núcleo: login, tela inicial, rotas, menus
 js/modulos.js         lista das áreas da casa (módulos)
 js/ui.js              utilitários de tela e ícones compartilhados
 js/avisos.js          avisos da tela inicial (o que pede atenção em cada área)
+js/backup.js          cópia de segurança em planilha (.xlsx)
 js/financas/index.js  módulo Finanças (todas as telas de finanças)
 js/compras/           módulo Lista de compras (itens.js entende "2 leite, pão e café"; corredores.js separa por corredor)
 js/calendario/        módulo Calendário (agenda, mês, agendas conectadas)

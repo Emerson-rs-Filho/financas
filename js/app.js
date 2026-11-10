@@ -98,7 +98,8 @@ function renderInicio() {
   app.innerHTML = `${demoBar()}
   <div class="hub">
     <header class="hub-top"><a class="brand" href="#inicio">${brand()}</a>
-      <div class="actions"><button class="btn icon" data-action="tema" aria-label="Alternar modo claro/escuro">${ico('tema', 18)}</button>
+      <div class="actions"><button class="btn icon" data-action="backup" aria-label="Baixar cópia dos dados (planilha)" title="Baixar cópia dos dados (planilha)">${ico('importar', 18)}</button>
+        <button class="btn icon" data-action="tema" aria-label="Alternar modo claro/escuro">${ico('tema', 18)}</button>
         <button class="btn icon" data-action="sair" aria-label="Sair">${ico('sair', 18)}</button></div></header>
     <section class="hub-hello">
       <span class="eyebrow">${esc(hoje)}</span>
@@ -219,6 +220,18 @@ async function sair() {
   renderLogin();
 }
 
+// Baixa uma planilha com todos os dados (cópia de segurança).
+async function backup(botao) {
+  if (!confirm('Baixar uma planilha do Excel com todos os dados da casa?\n\nGuarde o arquivo num lugar seguro: ele tem as finanças da família. Fotos e arquivos anexados não entram.')) return;
+  botao.disabled = true;
+  try {
+    const { baixarBackup } = await import('./backup.js');
+    const r = await baixarBackup();
+    if (r.falhas.length) alert(`A planilha foi baixada, mas faltou:\n\n${r.falhas.join('\n')}`);
+  } catch (e) { alert(`Não foi possível gerar a cópia: ${e.message}`); }
+  botao.disabled = false;
+}
+
 // ---------------- eventos ----------------
 app.addEventListener('click', async (ev) => {
   const b = ev.target.closest('[data-action]');
@@ -227,6 +240,7 @@ app.addEventListener('click', async (ev) => {
   if (a === 'tema') toggleTema();
   else if (a === 'menu') menuSheet();
   else if (a === 'sair') sair();
+  else if (a === 'backup') backup(b);
   else if (a === 'reset-demo') {
     if (confirm('Voltar aos dados originais da planilha? O que você lançou no modo demonstração será apagado.')) { db.resetDemo(); carregados.clear(); render(); }
   } else if (C.mod && C.mod.acao) C.mod.acao(a, b, C);
