@@ -512,3 +512,8 @@ a.brand { text-decoration: none; color: var(--text); }
 .mt-sub.neg { color: var(--danger); }
 .mt-hist { max-height: 38vh; overflow: auto; }
 @media (max-width: 640px) { .mt-grid { grid-template-columns: 1fr; } }
+
+/* ---------- avisos da tela inicial ---------- */
+.mod-av { align-self: flex-start; margin-top: 6px; font-size: 12px; font-weight: 600; line-height: 1.3; padding: 5px 10px; border-radius: 12px; background: rgba(20, 20, 20, 0.1); }
+.mod-av[hidden] { display: none; }
+.mod-av.alerta { background: var(--on-lime); color: var(--lime); }

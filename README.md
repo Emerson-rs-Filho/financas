@@ -11,6 +11,8 @@ App web para gerenciar a casa. Depois do login aparece a tela inicial com as **�
 - **Cardápio da semana** — almoço e jantar de cada dia, com os ingredientes indo para a lista de compras.
 - **Metas e sonhos** — viagem, reforma, reserva: quanto já foi guardado, quanto falta e quanto guardar por mês.
 
+Na tela inicial, cada área mostra um aviso do que pede atenção: contas vencendo, reparos atrasados, documentos para vencer, tarefas da semana, itens na lista e o prato de hoje.
+
 Tem modo claro e escuro, funciona no celular e no computador, e o login é com e-mail e senha.
 
 - **Hospedagem:** GitHub Pages (grátis)
@@ -226,6 +228,7 @@ js/config.js          ← suas chaves do Supabase
 js/app.js             núcleo: login, tela inicial, rotas, menus
 js/modulos.js         lista das áreas da casa (módulos)
 js/ui.js              utilitários de tela e ícones compartilhados
+js/avisos.js          avisos da tela inicial (o que pede atenção em cada área)
 js/financas/index.js  módulo Finanças (todas as telas de finanças)
 js/compras/           módulo Lista de compras (itens.js entende "2 leite, pão e café"; corredores.js separa por corredor)
 js/calendario/        módulo Calendário (agenda, mês, agendas conectadas)

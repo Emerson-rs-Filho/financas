@@ -3,6 +3,7 @@
 import * as db from './data.js';
 import { modal, esc, ico, brand } from './ui.js';
 import { MODULOS, modulo } from './modulos.js';
+import { carregarAvisos } from './avisos.js';
 
 const app = document.getElementById('app');
 // contexto entregue aos módulos
@@ -108,11 +109,19 @@ function renderInicio() {
       ${MODULOS.map((x) => `
       <a class="mod-card ${x.status === 'ativo' ? 'on' : 'soon'}" href="#${x.id}">
         <span class="mod-ic">${ico(x.icone, 24)}</span>
-        <span class="mod-txt"><span class="mod-nm">${esc(x.nome)}</span><span class="mod-ds">${esc(x.desc)}</span></span>
+        <span class="mod-txt"><span class="mod-nm">${esc(x.nome)}</span><span class="mod-ds">${esc(x.desc)}</span><span class="mod-av" data-av="${x.id}" hidden></span></span>
         ${x.status === 'ativo' ? `<span class="mod-go">${ico('seta', 20)}</span>` : '<span class="badge">em breve</span>'}
       </a>`).join('')}
     </nav>
   </div>`;
+  // avisos de cada área (o que vence, o que falta), preenchidos conforme chegam
+  carregarAvisos(MODULOS.filter((x) => x.status === 'ativo').map((x) => x.id), (id, av) => {
+    const el = app.querySelector(`.mod-av[data-av="${id}"]`);
+    if (!el) return;
+    el.textContent = av.texto;
+    el.classList.toggle('alerta', !!av.alerta);
+    el.hidden = false;
+  });
 }
 
 function renderEmBreve(def) {
