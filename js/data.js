@@ -270,7 +270,7 @@ export async function cotacoes(params) {
 }
 
 export function resetDemo() {
-  demo = { user: demo.user, lancamentos: seedLancamentos(), investimentos: [], compras: demo.compras || [], cal: demo.cal, reparos: demo.reparos, reparos_fotos: demo.reparos_fotos, nextId: Math.max(100000, demo.nextId || 0) };
+  demo = { user: demo.user, lancamentos: seedLancamentos(), investimentos: [], compras: demo.compras || [], compras_fechamentos: demo.compras_fechamentos, cal: demo.cal, reparos: demo.reparos, reparos_fotos: demo.reparos_fotos, nextId: Math.max(100000, demo.nextId || 0) };
   demoSave();
 }
 
@@ -326,6 +326,64 @@ export async function limparComprados() {
   const c = await client();
   const { error } = await c.from('compras_itens').delete().eq('comprado', true);
   if (error) throw error;
+}
+
+// Histórico de compras fechadas (para os "frequentes" e as "últimas compras").
+export async function listFechamentos() {
+  if (DEMO) return demoArr('compras_fechamentos').slice();
+  const c = await client();
+  const { data, error } = await c.from('compras_fechamentos').select('*').order('data', { ascending: false }).order('id', { ascending: false }).limit(200);
+  if (error) throw semTabela(error, 'compras_fechamentos');
+  return data.map((f) => ({ ...f, valor: f.valor == null ? null : Number(f.valor) }));
+}
+
+// Fecha a compra: guarda os itens comprados no histórico, tira-os da lista e, se pedido, lança o gasto em Finanças.
+// f: { data, mercado, valor, forma, itens: [{ id, nome, quantidade }], categoria (só quando lança) }
+export async function fecharCompra(f) {
+  const valor = +f.valor || null;
+  const row = { data: f.data, mercado: (f.mercado || '').trim() || null, valor, forma: valor ? f.forma : null,
+    itens: f.itens.map((i) => ({ nome: i.nome, quantidade: i.quantidade || null })) };
+  const ids = f.itens.map((i) => i.id);
+  const [ano, mes] = f.data.split('-').map(Number);
+  const lanc = valor && f.categoria ? { ano, mes, tipo: 'saida', descricao: row.mercado ? `Mercado – ${row.mercado}` : 'Compras do mercado', categoria: f.categoria.trim(), valor } : null;
+  if (DEMO) {
+    let lancamento_id = null;
+    if (lanc) { lancamento_id = demo.nextId++; demo.lancamentos.push({ id: lancamento_id, ...lanc }); }
+    demoArr('compras_fechamentos').unshift({ id: demo.nextId++, ...row, lancamento_id, criado_em: new Date().toISOString() });
+    demo.compras = demoCompras().filter((x) => !ids.includes(x.id));
+    demoSave();
+    return;
+  }
+  const c = await client();
+  let lancamento_id = null;
+  if (lanc) {
+    const { data, error } = await c.from('lancamentos').insert(lanc).select('id').single();
+    if (error) throw error;
+    lancamento_id = data.id;
+  }
+  const { error } = await c.from('compras_fechamentos').insert({ ...row, lancamento_id });
+  if (error) {
+    if (lancamento_id) await c.from('lancamentos').delete().eq('id', lancamento_id);
+    throw semTabela(error, 'compras_fechamentos');
+  }
+  if (ids.length) {
+    const { error: e2 } = await c.from('compras_itens').delete().in('id', ids);
+    if (e2) throw e2;
+  }
+}
+
+// Apaga o registro da compra e o lançamento que ela criou em Finanças (se houver).
+export async function excluirFechamento(f) {
+  if (DEMO) {
+    demo.compras_fechamentos = demoArr('compras_fechamentos').filter((x) => x.id !== f.id);
+    if (f.lancamento_id) demo.lancamentos = demo.lancamentos.filter((l) => l.id !== f.lancamento_id);
+    demoSave();
+    return;
+  }
+  const c = await client();
+  const { error } = await c.from('compras_fechamentos').delete().eq('id', f.id);
+  if (error) throw error;
+  if (f.lancamento_id) await c.from('lancamentos').delete().eq('id', f.lancamento_id);
 }
 
 // Avisa quando a lista muda em outro lugar (outro celular, Alexa). Devolve uma função para cancelar.

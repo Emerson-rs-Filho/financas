@@ -442,3 +442,16 @@ a.brand { text-decoration: none; color: var(--text); }
   .rp-grid { grid-template-columns: 1fr; }
   .rp-foto { width: 72px; height: 72px; }
 }
+
+/* ---------- lista de compras: frequentes e histórico ---------- */
+.shop-freq { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+.shop-freq::-webkit-scrollbar { display: none; }
+.shop-freq button { flex: none; min-height: 38px; padding: 0 12px 0 10px; border: 0; border-radius: 99px; background: var(--surface); color: var(--text); font: inherit; font-size: 13px; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap; }
+.shop-freq button svg { color: var(--inc); }
+.shop-hist { display: flex; flex-wrap: wrap; gap: 6px; max-height: 40vh; overflow: auto; }
+.shop-hist span { font-size: 13px; padding: 6px 10px; border-radius: 99px; background: var(--surface-2); }
+.shop-hist small { color: var(--muted); }
+.tile .grp-t:first-of-type { margin-top: 0; }
+@media (max-width: 900px) {
+  .shop-freq { margin: 0 -16px; padding: 0 16px; }
+}

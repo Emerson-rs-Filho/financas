@@ -142,8 +142,14 @@ Os meses do ano corrente que ainda não fecharam aparecem como previsão (tracej
 
 ### Lista de compras
 
+> Já usa o app? Rode de novo o `supabase/schema.sql`: ele cria a tabela `compras_fechamentos`. Não precisa publicar a função da Alexa de novo.
+
 - Digite no campo e aperte Enter. Dá para adicionar vários de uma vez e com quantidade: "2 leite, pão e 1 kg de café".
-- Toque no item para marcar como comprado (ele vai para *comprados*); toque de novo para voltar. *Limpar comprados* apaga os que já foram comprados.
+- A lista aparece **por corredor do mercado** (hortifrúti, padaria, açougue, frios, mercearia, bebidas, limpeza, higiene…), na ordem em que se anda na loja.
+- Toque no item para pôr **no carrinho**; toque de novo para voltar.
+- **Fechar compra:** tira do carrinho e guarda em *últimas compras*. Se informar o valor e pagar no débito, Pix ou dinheiro, cria a saída em Finanças. No crédito não lança, porque o gasto entra pela fatura importada.
+- **Frequentes:** acima da lista aparecem os itens que vocês mais compraram nos últimos 90 dias e que não estão na lista; um toque adiciona.
+- **Últimas compras:** toque numa compra para ver os itens, pôr tudo na lista de novo ou excluir (apaga também o lançamento que ela criou).
 - Itens que vieram pela Alexa aparecem com o selo **alexa**. Um item repetido não é duplicado: se já foi comprado, ele volta para a lista.
 - A lista atualiza sozinha quando o outro celular ou a Alexa mexe nela.
 
@@ -179,7 +185,7 @@ js/app.js             núcleo: login, tela inicial, rotas, menus
 js/modulos.js         lista das áreas da casa (módulos)
 js/ui.js              utilitários de tela e ícones compartilhados
 js/financas/index.js  módulo Finanças (todas as telas de finanças)
-js/compras/           módulo Lista de compras (+ itens.js: entende "2 leite, pão e café")
+js/compras/           módulo Lista de compras (itens.js entende "2 leite, pão e café"; corredores.js separa por corredor)
 js/calendario/        módulo Calendário (agenda, mês, agendas conectadas)
 js/reparos/           módulo Reparos e melhorias (com fotos no Storage)
 supabase/functions/google-auth/  conecta/desconecta a conta Google (OAuth)
