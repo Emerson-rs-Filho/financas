@@ -270,7 +270,7 @@ export async function cotacoes(params) {
 }
 
 export function resetDemo() {
-  demo = { user: demo.user, lancamentos: seedLancamentos(), investimentos: [], compras: demo.compras || [], cal: demo.cal, nextId: 100000 };
+  demo = { user: demo.user, lancamentos: seedLancamentos(), investimentos: [], compras: demo.compras || [], cal: demo.cal, reparos: demo.reparos, reparos_fotos: demo.reparos_fotos, nextId: Math.max(100000, demo.nextId || 0) };
   demoSave();
 }
 
@@ -339,6 +339,127 @@ export function assinarCompras(cb) {
   client().then((c) => {
     canal = c.channel('compras_itens')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'compras_itens' }, () => cb())
+      .subscribe();
+  });
+  return () => { if (canal) canal.unsubscribe(); };
+}
+
+// ---------- reparos e melhorias (fotos no Storage, bucket privado "reparos") ----------
+const BUCKET_REPAROS = 'reparos';
+const CAMPOS_REPARO = ['titulo', 'descricao', 'comodo', 'tipo', 'prioridade', 'status', 'responsavel', 'prazo', 'custo_estimado', 'custo_real', 'concluido_em'];
+const linhaReparo = (r) => {
+  const o = {};
+  CAMPOS_REPARO.forEach((k) => { if (k in r) o[k] = r[k] === '' ? null : r[k]; });
+  ['custo_estimado', 'custo_real'].forEach((k) => { if (o[k] != null) o[k] = +o[k]; });
+  if (o.titulo) o.titulo = o.titulo.trim();
+  return o;
+};
+const numReparo = (r) => ({ ...r, custo_estimado: r.custo_estimado == null ? null : Number(r.custo_estimado), custo_real: r.custo_real == null ? null : Number(r.custo_real) });
+
+export async function listReparos() {
+  if (DEMO) return { reparos: demoArr('reparos').slice(), fotos: demoArr('reparos_fotos').slice() };
+  const c = await client();
+  const [r, f] = await Promise.all([
+    c.from('reparos').select('*').order('id'),
+    c.from('reparos_fotos').select('*').order('id'),
+  ]);
+  if (r.error) throw semTabela(r.error, 'reparos');
+  if (f.error) throw semTabela(f.error, 'reparos_fotos');
+  return { reparos: r.data.map(numReparo), fotos: f.data };
+}
+
+// Cria ou altera; devolve o id.
+export async function salvarReparo(r) {
+  const row = linhaReparo(r);
+  if (DEMO) {
+    const a = demoArr('reparos');
+    if (r.id) { Object.assign(a.find((x) => x.id === +r.id), row); demoSave(); return +r.id; }
+    const id = demo.nextId++;
+    a.push({ id, status: 'a_fazer', ...row, criado_em: new Date().toISOString() });
+    demoSave();
+    return id;
+  }
+  const c = await client();
+  const { data, error } = r.id
+    ? await c.from('reparos').update(row).eq('id', r.id).select('id').single()
+    : await c.from('reparos').insert(row).select('id').single();
+  if (error) throw semTabela(error, 'reparos');
+  return data.id;
+}
+
+export async function excluirReparo(id, fotos = []) {
+  if (DEMO) {
+    demo.reparos = demoArr('reparos').filter((x) => x.id !== +id);
+    demo.reparos_fotos = demoArr('reparos_fotos').filter((f) => f.reparo_id !== +id);
+    demoSave();
+    return;
+  }
+  const c = await client();
+  if (fotos.length) await c.storage.from(BUCKET_REPAROS).remove(fotos.map((f) => f.path));
+  const { error } = await c.from('reparos').delete().eq('id', id);
+  if (error) throw error;
+}
+
+// blob: imagem já reduzida (JPEG). momento: 'antes' | 'depois'.
+export async function addFotoReparo(reparoId, blob, momento) {
+  if (DEMO) {
+    const dados = await new Promise((ok, fail) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = fail; fr.readAsDataURL(blob); });
+    const a = demoArr('reparos_fotos');
+    const f = { id: demo.nextId++, reparo_id: +reparoId, momento, path: '', dados, criado_em: new Date().toISOString() };
+    a.push(f);
+    try { localStorage.setItem(LS, JSON.stringify(demo)); } catch (e) {
+      a.pop();
+      throw new Error('O navegador ficou sem espaço para fotos no modo demonstração. Apague algumas fotos (no app de verdade elas ficam no Supabase).');
+    }
+    return f;
+  }
+  const c = await client();
+  const path = `${reparoId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+  const up = await c.storage.from(BUCKET_REPAROS).upload(path, blob, { contentType: 'image/jpeg', upsert: false });
+  if (up.error) throw new Error(/bucket/i.test(up.error.message) ? 'O espaço de fotos "reparos" ainda não existe. Rode de novo o arquivo supabase/schema.sql no SQL Editor do Supabase.' : up.error.message);
+  const { data, error } = await c.from('reparos_fotos').insert({ reparo_id: +reparoId, momento, path }).select('*').single();
+  if (error) { await c.storage.from(BUCKET_REPAROS).remove([path]); throw semTabela(error, 'reparos_fotos'); }
+  return data;
+}
+
+export async function excluirFotoReparo(f) {
+  if (DEMO) { demo.reparos_fotos = demoArr('reparos_fotos').filter((x) => x.id !== f.id); demoSave(); return; }
+  const c = await client();
+  await c.storage.from(BUCKET_REPAROS).remove([f.path]);
+  const { error } = await c.from('reparos_fotos').delete().eq('id', f.id);
+  if (error) throw error;
+}
+
+// Links temporários (1 hora) para mostrar as fotos do bucket privado. Devolve Map id → url.
+const cacheUrls = new Map();
+export async function urlsFotosReparo(fotos) {
+  const res = new Map();
+  if (DEMO) { fotos.forEach((f) => res.set(f.id, f.dados)); return res; }
+  const agora = Date.now();
+  const faltam = [];
+  fotos.forEach((f) => {
+    const c = cacheUrls.get(f.path);
+    if (c && c.ate > agora) res.set(f.id, c.url); else faltam.push(f);
+  });
+  if (faltam.length) {
+    const c = await client();
+    const { data, error } = await c.storage.from(BUCKET_REPAROS).createSignedUrls(faltam.map((f) => f.path), 3600);
+    if (!error) data.forEach((d, i) => {
+      if (!d.signedUrl) return;
+      cacheUrls.set(faltam[i].path, { url: d.signedUrl, ate: agora + 50 * 60 * 1000 });
+      res.set(faltam[i].id, d.signedUrl);
+    });
+  }
+  return res;
+}
+
+export function assinarReparos(cb) {
+  if (DEMO) return () => {};
+  let canal = null;
+  client().then((c) => {
+    canal = c.channel('reparos')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reparos' }, () => cb())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reparos_fotos' }, () => cb())
       .subscribe();
   });
   return () => { if (canal) canal.unsubscribe(); };

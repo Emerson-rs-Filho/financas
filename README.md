@@ -5,6 +5,7 @@ App web para gerenciar a casa. Depois do login aparece a tela inicial com as **�
 - **Finanças** — resumo do ano com gráficos, lançamentos mês a mês, cartões (com importação da fatura do Nubank), investimentos, calculadoras e dicas de economia.
 - **Calendário** — a agenda da família, conectada ao Google Agenda.
 - **Lista de compras** — compartilhada entre vocês dois, atualiza na hora nos dois celulares e recebe itens pela Alexa ("Alexa, peça à nossa casa para adicionar leite").
+- **Reparos e melhorias** — o que consertar ou melhorar na casa, por cômodo e prioridade, com fotos de antes e depois.
 
 Tem modo claro e escuro, funciona no celular e no computador, e o login é com e-mail e senha.
 
@@ -146,6 +147,16 @@ Os meses do ano corrente que ainda não fecharam aparecem como previsão (tracej
 - Itens que vieram pela Alexa aparecem com o selo **alexa**. Um item repetido não é duplicado: se já foi comprado, ele volta para a lista.
 - A lista atualiza sozinha quando o outro celular ou a Alexa mexe nela.
 
+### Reparos e melhorias
+
+> Já usa o app? Rode de novo o `supabase/schema.sql` no SQL Editor: ele cria as tabelas `reparos` e `reparos_fotos` e o espaço de fotos (bucket privado `reparos`).
+
+- **Novo:** o que precisa ser feito, cômodo, tipo (reparo ou melhoria), prioridade, quem faz, prazo, custo previsto, detalhes e fotos. No celular, o campo de fotos abre a câmera ou a galeria.
+- **Lista:** em aberto primeiro, por prioridade e prazo; itens atrasados ficam em vermelho. Filtre por situação e por cômodo.
+- **Detalhe:** toque no item para ver tudo, mudar a situação (a fazer · fazendo · feito), adicionar ou apagar fotos de *antes* e *depois* e ampliar uma foto.
+- **Concluir:** informe quanto custou e, se quiser, marque *lançar este gasto em Finanças* (vira uma saída no mês da conclusão). Não marque se pagou no cartão de crédito: o gasto já entra pela fatura importada.
+- As fotos são reduzidas no próprio celular antes de enviar e ficam num espaço privado do Supabase: só quem está logado vê. No modo demonstração ficam no navegador, em tamanho pequeno.
+
 ### Calendário
 
 - **Agendas:** toque em *conectar Google Agenda* e autorize. Depois, em cada agenda, marque:
@@ -170,6 +181,7 @@ js/ui.js              utilitários de tela e ícones compartilhados
 js/financas/index.js  módulo Finanças (todas as telas de finanças)
 js/compras/           módulo Lista de compras (+ itens.js: entende "2 leite, pão e café")
 js/calendario/        módulo Calendário (agenda, mês, agendas conectadas)
+js/reparos/           módulo Reparos e melhorias (com fotos no Storage)
 supabase/functions/google-auth/  conecta/desconecta a conta Google (OAuth)
 supabase/functions/agenda/       sincroniza, cria e exclui eventos no Google Agenda
 supabase/functions/_shared/      código comum das duas (tokens cifrados, Calendar API)

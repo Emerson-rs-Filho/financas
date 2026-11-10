@@ -6,8 +6,9 @@ import { MODULOS, modulo } from './modulos.js';
 
 const app = document.getElementById('app');
 // contexto entregue aos módulos
-const C = { user: null, mod: null, def: null, aba: null, render, irPara };
 const carregados = new Set();
+// esquecer(id): o módulo é recarregado na próxima visita (ex.: um reparo lançou um gasto em Finanças)
+const C = { user: null, mod: null, def: null, aba: null, render, irPara, esquecer: (id) => carregados.delete(id) };
 const ABAS_ANTIGAS = ['resumo', 'lancamentos', 'cartoes', 'investimentos', 'calculadoras', 'dicas'];
 
 // ---------------- rotas: #inicio · #<modulo> · #<modulo>/<aba> ----------------

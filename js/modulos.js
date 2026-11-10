@@ -9,6 +9,8 @@ export const MODULOS = [
     load: () => import('./calendario/index.js').then((m) => m.default) },
   { id: 'compras', nome: 'Lista de compras', desc: 'O que falta em casa, compartilhada entre vocês e com a Alexa', icone: 'compras', status: 'ativo',
     load: () => import('./compras/index.js').then((m) => m.default) },
+  { id: 'reparos', nome: 'Reparos e melhorias', desc: 'O que consertar ou melhorar na casa, com fotos de antes e depois', icone: 'reparos', status: 'ativo',
+    load: () => import('./reparos/index.js').then((m) => m.default) },
 ];
 
 export const modulo = (id) => MODULOS.find((m) => m.id === id);
