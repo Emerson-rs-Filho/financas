@@ -15,6 +15,8 @@ export const MODULOS = [
     load: () => import('./documentos/index.js').then((m) => m.default) },
   { id: 'rotina', nome: 'Tarefas da casa', desc: 'O que se repete: limpezas, trocas e manutenções, com lembrete', icone: 'rotina', status: 'ativo',
     load: () => import('./rotina/index.js').then((m) => m.default) },
+  { id: 'cardapio', nome: 'Cardápio da semana', desc: 'O que vai ter no almoço e no jantar, com os ingredientes indo para a lista', icone: 'cardapio', status: 'ativo',
+    load: () => import('./cardapio/index.js').then((m) => m.default) },
 ];
 
 export const modulo = (id) => MODULOS.find((m) => m.id === id);

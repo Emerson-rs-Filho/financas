@@ -270,7 +270,7 @@ export async function cotacoes(params) {
 }
 
 export function resetDemo() {
-  demo = { user: demo.user, lancamentos: seedLancamentos(), investimentos: [], compras: demo.compras || [], compras_fechamentos: demo.compras_fechamentos, cal: demo.cal, reparos: demo.reparos, reparos_fotos: demo.reparos_fotos, documentos: demo.documentos, rotinas: demo.rotinas, rotinas_feitas: demo.rotinas_feitas, nextId: Math.max(100000, demo.nextId || 0) };
+  demo = { user: demo.user, lancamentos: seedLancamentos(), investimentos: [], compras: demo.compras || [], compras_fechamentos: demo.compras_fechamentos, cal: demo.cal, reparos: demo.reparos, reparos_fotos: demo.reparos_fotos, documentos: demo.documentos, rotinas: demo.rotinas, rotinas_feitas: demo.rotinas_feitas, cardapio: demo.cardapio, nextId: Math.max(100000, demo.nextId || 0) };
   demoSave();
 }
 
@@ -655,6 +655,33 @@ export async function desfazerRotina(feita) {
   const { error } = await c.from('rotinas_feitas').delete().eq('id', feita.id);
   if (error) throw error;
   if (feita.proxima_anterior) await c.from('rotinas').update({ proxima: feita.proxima_anterior }).eq('id', feita.rotina_id);
+}
+
+// ---------- cardápio da semana ----------
+export async function listCardapio() {
+  if (DEMO) return demoArr('cardapio').slice();
+  const c = await client();
+  const desde = new Date(Date.now() - 365 * 864e5).toISOString().slice(0, 10);
+  const { data, error } = await c.from('cardapio').select('*').gte('dia', desde).order('dia');
+  if (error) throw semTabela(error, 'cardapio');
+  return data;
+}
+
+// Uma refeição por dia e tipo (almoço/jantar). Prato vazio apaga.
+export async function salvarCardapio({ dia, refeicao, prato, ingredientes }) {
+  const row = { dia, refeicao, prato: (prato || '').trim(), ingredientes: (ingredientes || '').trim() || null };
+  if (DEMO) {
+    const a = demoArr('cardapio');
+    const i = a.findIndex((x) => x.dia === dia && x.refeicao === refeicao);
+    if (!row.prato) { if (i >= 0) a.splice(i, 1); } else if (i >= 0) Object.assign(a[i], row); else a.push({ id: demo.nextId++, ...row });
+    demoSave();
+    return;
+  }
+  const c = await client();
+  const { error } = row.prato
+    ? await c.from('cardapio').upsert(row, { onConflict: 'dia,refeicao' })
+    : await c.from('cardapio').delete().eq('dia', dia).eq('refeicao', refeicao);
+  if (error) throw semTabela(error, 'cardapio');
 }
 
 // ---------- calendário (Google Agenda, via Edge Functions "google-auth" e "agenda") ----------

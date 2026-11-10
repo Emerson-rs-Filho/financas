@@ -469,3 +469,30 @@ a.brand { text-decoration: none; color: var(--text); }
 .rt-sug { display: flex; flex-direction: column; gap: 2px; max-height: 46vh; overflow: auto; }
 .rt-sug .check { align-items: flex-start; padding: 8px 0; }
 .rt-sug small { display: block; }
+
+/* ---------- cardápio da semana ---------- */
+.cd-nav { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.cd-sem { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 15px; text-align: center; }
+.cd-sem span { font-size: 12px; }
+.cd-dias { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+.cd-dia { padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+.cd-dia.hoje { outline: 2px solid var(--lime); outline-offset: -2px; }
+.cd-dia.passou { opacity: 0.6; }
+.cd-dia-h { display: flex; align-items: baseline; gap: 8px; padding: 0 4px; }
+.cd-dia-h h2 { font-size: 16px; font-weight: 600; text-transform: lowercase; }
+.cd-dia-h .num { font-size: 12px; }
+.cd-dia-h .badge { margin-left: auto; padding: 3px 8px; font-size: 11px; }
+.cd-slot { display: flex; flex-direction: column; gap: 2px; text-align: left; min-height: 56px; padding: 9px 12px; border: 0; border-radius: 14px; background: var(--surface-2); color: var(--text); font: inherit; cursor: pointer; min-width: 0; }
+.cd-slot:hover { filter: brightness(1.08); }
+.cd-slot.vazio { background: transparent; border: 1.5px dashed var(--border); }
+.cd-slot.vazio .cd-prato { color: var(--muted); font-weight: 400; }
+.cd-ref { font-size: 11px; color: var(--muted); }
+.cd-prato { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cd-ing { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cd-acoes { display: flex; flex-wrap: wrap; gap: 8px; }
+.btn:disabled { opacity: 0.45; cursor: default; }
+.rt-sug .tag { font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 99px; background: var(--surface-2); color: var(--muted); }
+@media (max-width: 640px) {
+  .cd-dias { grid-template-columns: 1fr; }
+  .cd-acoes .btn { flex: 1 1 100%; }
+}
