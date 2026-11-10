@@ -6,6 +6,7 @@ App web para gerenciar a casa. Depois do login aparece a tela inicial com as **�
 - **Calendário** — a agenda da família, conectada ao Google Agenda.
 - **Lista de compras** — compartilhada entre vocês dois, atualiza na hora nos dois celulares e recebe itens pela Alexa ("Alexa, peça à nossa casa para adicionar leite").
 - **Reparos e melhorias** — o que consertar ou melhorar na casa, por cômodo e prioridade, com fotos de antes e depois.
+- **Documentos e garantias** — notas fiscais, garantias, seguros e contratos com a foto ou o PDF, e aviso antes de vencer.
 
 Tem modo claro e escuro, funciona no celular e no computador, e o login é com e-mail e senha.
 
@@ -163,6 +164,16 @@ Os meses do ano corrente que ainda não fecharam aparecem como previsão (tracej
 - **Concluir:** informe quanto custou e, se quiser, marque *lançar este gasto em Finanças* (vira uma saída no mês da conclusão). Não marque se pagou no cartão de crédito: o gasto já entra pela fatura importada.
 - As fotos são reduzidas no próprio celular antes de enviar e ficam num espaço privado do Supabase: só quem está logado vê. No modo demonstração ficam no navegador, em tamanho pequeno.
 
+### Documentos e garantias
+
+> Já usa o app? Rode de novo o `supabase/schema.sql`: ele cria a tabela `documentos` e o espaço de arquivos (bucket privado `documentos`).
+
+- **Novo:** nome, tipo (garantia, nota fiscal, seguro, documento pessoal, contrato, manual), de quem ou do quê, vencimento, com quantos dias de antecedência avisar, observações e o arquivo (foto ou PDF, até 20 MB).
+- **Garantia:** informe a data da compra e os meses de garantia e o vencimento é calculado.
+- **Lista:** os vencidos aparecem primeiro, depois os que estão vencendo, depois os demais. Dá para buscar e filtrar por tipo.
+- **Abrir o arquivo:** o app gera um link que vale 5 minutos. Os arquivos ficam num espaço privado do Supabase, que só quem está logado acessa.
+- No modo demonstração o arquivo não é guardado, só os dados.
+
 ### Calendário
 
 - **Agendas:** toque em *conectar Google Agenda* e autorize. Depois, em cada agenda, marque:
@@ -188,6 +199,7 @@ js/financas/index.js  módulo Finanças (todas as telas de finanças)
 js/compras/           módulo Lista de compras (itens.js entende "2 leite, pão e café"; corredores.js separa por corredor)
 js/calendario/        módulo Calendário (agenda, mês, agendas conectadas)
 js/reparos/           módulo Reparos e melhorias (com fotos no Storage)
+js/documentos/        módulo Documentos e garantias (arquivos no Storage)
 supabase/functions/google-auth/  conecta/desconecta a conta Google (OAuth)
 supabase/functions/agenda/       sincroniza, cria e exclui eventos no Google Agenda
 supabase/functions/_shared/      código comum das duas (tokens cifrados, Calendar API)

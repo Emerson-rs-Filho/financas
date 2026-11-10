@@ -455,3 +455,10 @@ a.brand { text-decoration: none; color: var(--text); }
 @media (max-width: 900px) {
   .shop-freq { margin: 0 -16px; padding: 0 16px; }
 }
+
+/* ---------- documentos e garantias ---------- */
+.doc-busca { cursor: text; }
+.doc-busca input::-webkit-search-cancel-button { filter: grayscale(1); }
+.tile-head h2.neg, .li-s.neg { color: var(--danger); }
+.doc-abrir { justify-content: flex-start; background: var(--surface-2); min-width: 0; }
+.doc-abrir span { min-width: 0; overflow: hidden; text-overflow: ellipsis; flex: 1; text-align: left; }

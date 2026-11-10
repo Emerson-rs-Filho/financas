@@ -11,6 +11,8 @@ export const MODULOS = [
     load: () => import('./compras/index.js').then((m) => m.default) },
   { id: 'reparos', nome: 'Reparos e melhorias', desc: 'O que consertar ou melhorar na casa, com fotos de antes e depois', icone: 'reparos', status: 'ativo',
     load: () => import('./reparos/index.js').then((m) => m.default) },
+  { id: 'documentos', nome: 'Documentos e garantias', desc: 'Notas, garantias, seguros e contratos, com aviso antes de vencer', icone: 'documentos', status: 'ativo',
+    load: () => import('./documentos/index.js').then((m) => m.default) },
 ];
 
 export const modulo = (id) => MODULOS.find((m) => m.id === id);

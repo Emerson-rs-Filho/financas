@@ -1,6 +1,6 @@
 // Módulo Reparos e melhorias: o que precisa ser feito na casa, por cômodo e prioridade, com fotos de antes e depois.
 import * as db from '../data.js';
-import { modal, esc, ico } from '../ui.js';
+import { modal, esc, ico, reduzirImagem as reduzir } from '../ui.js';
 
 let C = { render() {}, irPara() {}, esquecer() {} };
 let R = [];          // reparos
@@ -30,24 +30,6 @@ async function carregarTudo() {
 async function recarregar() {
   await carregarTudo();
   if (C.def && C.def.id === 'reparos' && document.getElementById('rp-body')) pintar();
-}
-
-// Reduz a foto no próprio celular antes de enviar (fotos de câmera têm 3–8 MB).
-async function reduzir(file, max, q) {
-  let src;
-  try { src = await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch (e) {
-    src = await new Promise((ok, fail) => {
-      const i = new Image();
-      i.onload = () => ok(i);
-      i.onerror = () => fail(new Error(`Não consegui abrir "${file.name}". Use uma foto JPG ou PNG.`));
-      i.src = URL.createObjectURL(file);
-    });
-  }
-  const k = Math.min(1, max / Math.max(src.width, src.height));
-  const cv = document.createElement('canvas');
-  cv.width = Math.round(src.width * k); cv.height = Math.round(src.height * k);
-  cv.getContext('2d').drawImage(src, 0, 0, cv.width, cv.height);
-  return new Promise((ok, fail) => cv.toBlob((b) => (b ? ok(b) : fail(new Error('Falha ao preparar a foto.'))), 'image/jpeg', q));
 }
 
 async function enviarFotos(reparoId, files, momento, aviso) {

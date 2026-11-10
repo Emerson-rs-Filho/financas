@@ -44,6 +44,27 @@ export const IC = {
   refresh: 'M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7',
   reparos: 'M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z',
   melhoria: 'M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9zM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z',
+  documentos: 'M6 2h9l5 5v15H6zM14 2v6h6M9 13h6M9 17h6',
+  clipe: 'M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9',
+  busca: 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.3-4.3',
   camera: 'M3 8h4l2-3h6l2 3h4v12H3zM12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
 };
 export const ico = (k, s = 20) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${IC[k] || IC.inicio}"></path></svg>`;
+
+// Reduz a foto no próprio celular antes de enviar (fotos de câmera têm 3–8 MB).
+export async function reduzirImagem(file, max, q) {
+  let src;
+  try { src = await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch (e) {
+    src = await new Promise((ok, fail) => {
+      const i = new Image();
+      i.onload = () => ok(i);
+      i.onerror = () => fail(new Error(`Não consegui abrir "${file.name}". Use uma foto JPG ou PNG.`));
+      i.src = URL.createObjectURL(file);
+    });
+  }
+  const k = Math.min(1, max / Math.max(src.width, src.height));
+  const cv = document.createElement('canvas');
+  cv.width = Math.round(src.width * k); cv.height = Math.round(src.height * k);
+  cv.getContext('2d').drawImage(src, 0, 0, cv.width, cv.height);
+  return new Promise((ok, fail) => cv.toBlob((b) => (b ? ok(b) : fail(new Error('Falha ao preparar a foto.'))), 'image/jpeg', q));
+}

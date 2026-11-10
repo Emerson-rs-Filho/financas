@@ -270,7 +270,7 @@ export async function cotacoes(params) {
 }
 
 export function resetDemo() {
-  demo = { user: demo.user, lancamentos: seedLancamentos(), investimentos: [], compras: demo.compras || [], compras_fechamentos: demo.compras_fechamentos, cal: demo.cal, reparos: demo.reparos, reparos_fotos: demo.reparos_fotos, nextId: Math.max(100000, demo.nextId || 0) };
+  demo = { user: demo.user, lancamentos: seedLancamentos(), investimentos: [], compras: demo.compras || [], compras_fechamentos: demo.compras_fechamentos, cal: demo.cal, reparos: demo.reparos, reparos_fotos: demo.reparos_fotos, documentos: demo.documentos, nextId: Math.max(100000, demo.nextId || 0) };
   demoSave();
 }
 
@@ -521,6 +521,66 @@ export function assinarReparos(cb) {
       .subscribe();
   });
   return () => { if (canal) canal.unsubscribe(); };
+}
+
+// ---------- documentos e garantias (arquivos no Storage, bucket privado "documentos") ----------
+const BUCKET_DOCS = 'documentos';
+const CAMPOS_DOC = ['titulo', 'tipo', 'dono', 'vencimento', 'avisar_dias', 'observacao'];
+const linhaDoc = (d) => {
+  const o = {};
+  CAMPOS_DOC.forEach((k) => { if (k in d) o[k] = d[k] === '' ? null : d[k]; });
+  o.avisar_dias = +o.avisar_dias || 30;
+  if (o.titulo) o.titulo = o.titulo.trim();
+  return o;
+};
+
+export async function listDocumentos() {
+  if (DEMO) return demoArr('documentos').slice();
+  const c = await client();
+  const { data, error } = await c.from('documentos').select('*').order('id');
+  if (error) throw semTabela(error, 'documentos');
+  return data;
+}
+
+// arquivo (opcional): File ou Blob com .name; substitui o arquivo anterior do documento.
+export async function salvarDocumento(d, arquivo) {
+  const row = linhaDoc(d);
+  if (DEMO) {
+    if (arquivo) Object.assign(row, { arquivo_path: 'demo', arquivo_nome: arquivo.name, arquivo_tipo: arquivo.type, tamanho: arquivo.size });
+    const a = demoArr('documentos');
+    if (d.id) Object.assign(a.find((x) => x.id === +d.id), row); else a.push({ id: demo.nextId++, ...row, criado_em: new Date().toISOString() });
+    demoSave();
+    return;
+  }
+  const c = await client();
+  let novo = null;
+  if (arquivo) {
+    const ext = (/\.([a-z0-9]{1,5})$/i.exec(arquivo.name || '') || [, 'bin'])[1].toLowerCase();
+    novo = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    const up = await c.storage.from(BUCKET_DOCS).upload(novo, arquivo, { contentType: arquivo.type || 'application/octet-stream', upsert: false });
+    if (up.error) throw new Error(/bucket/i.test(up.error.message) ? 'O espaço de arquivos "documentos" ainda não existe. Rode de novo o arquivo supabase/schema.sql no SQL Editor do Supabase.' : up.error.message);
+    Object.assign(row, { arquivo_path: novo, arquivo_nome: arquivo.name, arquivo_tipo: arquivo.type, tamanho: arquivo.size });
+  }
+  const { error } = d.id ? await c.from('documentos').update(row).eq('id', d.id) : await c.from('documentos').insert(row);
+  if (error) { if (novo) await c.storage.from(BUCKET_DOCS).remove([novo]); throw semTabela(error, 'documentos'); }
+  if (novo && d.arquivo_path) await c.storage.from(BUCKET_DOCS).remove([d.arquivo_path]);
+}
+
+export async function excluirDocumento(d) {
+  if (DEMO) { demo.documentos = demoArr('documentos').filter((x) => x.id !== d.id); demoSave(); return; }
+  const c = await client();
+  if (d.arquivo_path) await c.storage.from(BUCKET_DOCS).remove([d.arquivo_path]);
+  const { error } = await c.from('documentos').delete().eq('id', d.id);
+  if (error) throw error;
+}
+
+// Link temporário (5 minutos) para abrir o arquivo do bucket privado.
+export async function urlDocumento(d) {
+  if (DEMO) throw new Error('No modo demonstração o arquivo não é guardado, só os dados do documento.');
+  const c = await client();
+  const { data, error } = await c.storage.from(BUCKET_DOCS).createSignedUrl(d.arquivo_path, 300);
+  if (error) throw error;
+  return data.signedUrl;
 }
 
 // ---------- calendário (Google Agenda, via Edge Functions "google-auth" e "agenda") ----------
