@@ -6,7 +6,8 @@ import * as calc from '../calc.js';
 import { modal, esc, css, ico, sinal, PAL } from '../ui.js';
 
 const S = { lancs: [], invs: [], ano: new Date().getFullYear(), mes: null, charts: [],
-  calc: 'meta', calcIn: {}, taxas: null, taxasErr: '', hist: null };
+  calc: 'meta', calcIn: {}, taxas: null, taxasErr: '', hist: null,
+  contas: [], pags: [], orc: [], erroExtra: '' };
 const TIPOS_INV = ['Reserva de emergência', 'Tesouro Direto', 'CDB / LCI / LCA', 'Fundos', 'Ações / FIIs', 'Previdência', 'Outros'];
 
 // contexto do núcleo (render da estrutura, aba atual, navegação)
@@ -37,6 +38,7 @@ function viewResumo(el) {
   <div class="page-head"><h1>resumo</h1>
     <div class="actions"><button class="btn" data-action="importar">${ico('importar', 16)}<span class="lbl">importar fatura</span></button>
       <button class="btn lime" data-action="novo-l" data-tipo="saida">${ico('plus', 16)}novo lançamento</button></div></div>
+  ${alertasHtml()}
   <section class="row2">
     <div class="lime-card" style="flex:2 1 520px">
       <div class="lime-top">
@@ -222,8 +224,10 @@ async function copiarMesAnterior() {
   const [pa, pm] = m === 1 ? [S.ano - 1, 12] : [S.ano, m - 1];
   const prev = S.lancs.filter((l) => l.ano === pa && l.mes === pm && l.tipo === 'saida' && !l.cartao && !/cart|outr/i.test(l.categoria));
   const ja = new Set(S.lancs.filter((l) => l.ano === S.ano && l.mes === m).map((l) => l.descricao));
-  const novos = prev.filter((l) => !ja.has(l.descricao));
-  if (!novos.length) return alert('Nada para copiar: os fixos do mês anterior já estão neste mês.');
+  // o que já é conta a pagar entra sozinho quando for pago; não copia para não contar em dobro
+  const contas = new Set(S.contas.filter((k) => k.ativa !== false && k.recorrente).map((k) => norm(k.descricao)));
+  const novos = prev.filter((l) => !ja.has(l.descricao) && !contas.has(norm(l.descricao)));
+  if (!novos.length) return alert(contas.size ? 'Nada para copiar: os fixos já estão neste mês ou são contas a pagar (veja a aba Contas).' : 'Nada para copiar: os fixos do mês anterior já estão neste mês.');
   if (!confirm(`Copiar ${novos.length} contas fixas de ${MESES[pm - 1]} para ${MESES[m - 1]}? Depois é só ajustar os valores.`)) return;
   for (const l of novos) await db.saveLancamento({ ...l, id: null, ano: S.ano, mes: m });
   S.lancs = await db.listLancamentos();
@@ -758,20 +762,362 @@ function chartOpts({ money, stacked, legend }) {
 }
 
 
+// ---------------- Contas a pagar e orçamento: utilidades ----------------
+const norm = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+const hojeData = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), d.getDate()); };
+const isoDia = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const dm = (d) => `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
+const DIA = 86400000;
+// mês mostrado em Contas/Orçamento: o escolhido, senão o mês atual (ano corrente) ou dezembro
+function mesPadrao() {
+  if (S.mes != null) return S.mes;
+  const h = new Date();
+  return S.ano === h.getFullYear() ? h.getMonth() : 11;
+}
+const chipsMeses = (m, extra = () => '') => `<div class="months" role="group" aria-label="Mês">${MES_CURTO.map((nm, i) =>
+  `<button class="chip" data-action="mes" data-mes="${i}" aria-pressed="${i === m}"><span style="font-weight:600;font-size:13px">${nm}</span><small class="num muted">${extra(i) || '&nbsp;'}</small></button>`).join('')}</div>`;
+
+// Contas que valem no mês (1–12), com vencimento, pagamento e situação.
+function contasDoMes(ano, mes) {
+  const hoje = hojeData();
+  return S.contas.filter((k) => k.ativa !== false).map((k) => {
+    let venc;
+    if (k.recorrente) {
+      if (k.criado_em) { const c = new Date(k.criado_em); if (ano * 12 + mes < c.getFullYear() * 12 + c.getMonth() + 1) return null; }
+      const ultimo = new Date(ano, mes, 0).getDate();
+      venc = new Date(ano, mes - 1, Math.min(k.dia_vencimento || 1, ultimo));
+    } else {
+      if (!k.vencimento || +k.vencimento.slice(0, 4) !== ano || +k.vencimento.slice(5, 7) !== mes) return null;
+      venc = new Date(+k.vencimento.slice(0, 4), +k.vencimento.slice(5, 7) - 1, +k.vencimento.slice(8, 10));
+    }
+    const pag = S.pags.find((p) => p.conta_id === k.id && p.ano === ano && p.mes === mes);
+    const dias = Math.round((venc - hoje) / DIA);
+    const sit = pag ? 'paga' : dias < 0 ? 'vencida' : dias <= 7 ? 'proxima' : 'futura';
+    return { k, venc, pag, dias, sit };
+  }).filter(Boolean).sort((a, b) => a.venc - b.venc);
+}
+
+// Gasto do mês por categoria (lançamentos de saída, inclusive compras do cartão importadas).
+function gastoPorCategoria(ano, mes) {
+  const m = new Map();
+  S.lancs.filter((l) => l.ano === ano && l.mes === mes && l.tipo === 'saida').forEach((l) => m.set(l.categoria, (m.get(l.categoria) || 0) + l.valor));
+  return m;
+}
+// Média mensal da categoria nos meses fechados do ano (sugestão de teto).
+function mediaCategoria(cat) {
+  const r = resumoAno(S.lancs, S.ano);
+  if (!r.n) return 0;
+  const tot = r.L.filter((l) => l.tipo === 'saida' && l.mes <= r.n && l.categoria === cat).reduce((a, l) => a + l.valor, 0);
+  return tot / r.n;
+}
+const sugerirTeto = (v) => (v > 0 ? Math.ceil(v / 50) * 50 : '');
+
+async function recarregarFinancas() {
+  [S.lancs] = await Promise.all([db.listLancamentos(), carregarContasOrc()]);
+}
+async function carregarContasOrc() {
+  try {
+    const [{ contas, pagamentos }, orc] = await Promise.all([db.listContas(), db.listOrcamentos()]);
+    S.contas = contas; S.pags = pagamentos; S.orc = orc; S.erroExtra = '';
+  } catch (e) { S.contas = []; S.pags = []; S.orc = []; S.erroExtra = e.message; }
+}
+
+// Avisos para o topo do Resumo: contas vencidas/vencendo e categorias perto do teto (mês atual).
+function alertasHtml() {
+  const h = new Date();
+  if (S.ano !== h.getFullYear()) return '';
+  const ano = h.getFullYear(), mes = h.getMonth() + 1;
+  const cs = contasDoMes(ano, mes);
+  const venc = cs.filter((c) => c.sit === 'vencida');
+  const logo = cs.filter((c) => !c.pag && c.dias >= 0 && c.dias <= 3);
+  const gasto = gastoPorCategoria(ano, mes);
+  const orc = S.orc.map((o) => ({ ...o, gasto: gasto.get(o.categoria) || 0 })).filter((o) => o.gasto >= o.teto * 0.8).sort((a, b) => b.gasto / b.teto - a.gasto / a.teto);
+  const itens = [];
+  if (venc.length) itens.push(`<a class="alerta neg" href="#financas/contas">${ico('alerta', 16)}${venc.length} ${venc.length > 1 ? 'contas vencidas' : 'conta vencida'}: ${esc(venc.map((c) => c.k.descricao).join(', '))}</a>`);
+  logo.forEach((c) => itens.push(`<a class="alerta" href="#financas/contas">${ico('contas', 16)}${esc(c.k.descricao)} vence ${c.dias === 0 ? 'hoje' : c.dias === 1 ? 'amanhã' : `em ${c.dias} dias`} · ${brl(c.k.valor_previsto)}</a>`));
+  orc.slice(0, 3).forEach((o) => itens.push(`<a class="alerta ${o.gasto > o.teto ? 'neg' : ''}" href="#financas/orcamento">${ico('orcamento', 16)}${esc(o.categoria)}: ${Math.round(o.gasto / o.teto * 100)}% do teto</a>`));
+  return itens.length ? `<div class="alertas">${itens.join('')}</div>` : '';
+}
+
+// ---------------- Contas a pagar ----------------
+function viewContas(el) {
+  const m = mesPadrao(), ano = S.ano, mes = m + 1;
+  const head = `<div class="page-head"><h1>contas</h1>
+    <div class="actions"><button class="btn" data-action="contas-fixos" title="Criar contas a partir dos fixos">${ico('copiar', 16)}<span class="lbl">criar dos fixos</span></button>
+      <button class="btn lime" data-action="nova-k">${ico('plus', 16)}nova conta</button></div></div>`;
+  if (S.erroExtra) { el.innerHTML = `${head}<div class="empty">${esc(S.erroExtra)}</div>`; return; }
+  if (!S.contas.length) {
+    el.innerHTML = `${head}<div class="empty">Cadastre as contas que vencem todo mês (aluguel, luz, internet, escola…) e o app avisa o que vence e o que já foi pago.<br>
+      Ao marcar uma conta como paga, ela vira um lançamento automaticamente — não precisa mais copiar os fixos.<br><br>
+      <button class="btn lime" data-action="contas-fixos">${ico('copiar', 16)}criar a partir dos fixos do mês anterior</button></div>`;
+    return;
+  }
+  const cs = contasDoMes(ano, mes);
+  const pendentes = cs.filter((c) => !c.pag);
+  const pagas = cs.filter((c) => c.pag);
+  const totPrev = cs.reduce((a, c) => a + (c.pag ? c.pag.valor : c.k.valor_previsto), 0);
+  const totPago = pagas.reduce((a, c) => a + c.pag.valor, 0);
+  const falta = pendentes.reduce((a, c) => a + c.k.valor_previsto, 0);
+  const qtdVenc = (i) => { const n = contasDoMes(ano, i + 1).filter((c) => !c.pag).length; return n ? `${n} a pagar` : ''; };
+  const linha = (c) => {
+    const sub = c.pag ? `pago em ${c.pag.pago_em.split('-').reverse().slice(0, 2).join('/')}` : c.sit === 'vencida' ? `venceu ${dm(c.venc)}` : c.dias === 0 ? 'vence hoje' : `vence ${dm(c.venc)}`;
+    return `<div class="li tap" data-action="edit-k" data-id="${c.k.id}">
+      <span class="li-ic dia num ${c.sit === 'vencida' ? 'neg' : ''}">${String(c.venc.getDate()).padStart(2, '0')}</span>
+      <div class="li-main"><span class="li-t">${esc(c.k.descricao)}</span><span class="li-s ${c.sit === 'vencida' ? 'neg' : ''}">${esc(c.k.categoria)} · ${sub}${c.k.recorrente ? '' : ' · avulsa'}</span></div>
+      <div class="li-v num">${brl(c.pag ? c.pag.valor : c.k.valor_previsto, 2)}${c.pag ? '<small class="pos">paga</small>' : ''}</div>
+      ${c.pag ? `<button class="btn icon" data-action="desfazer-pag" data-id="${c.pag.id}" aria-label="Desfazer pagamento de ${esc(c.k.descricao)}" title="Desfazer pagamento">${ico('desfazer', 16)}</button>`
+        : `<button class="btn lime pagar" data-action="pagar-k" data-id="${c.k.id}">pagar</button>`}
+    </div>`;
+  };
+  const grupo = (titulo, lista, cls = '') => (lista.length ? `<div class="grp-t ${cls}">${titulo}</div><div class="list">${lista.map(linha).join('')}</div>` : '');
+  el.innerHTML = `${head}
+  ${chipsMeses(m, qtdVenc)}
+  <section class="row2">
+    <div class="lime-card" style="flex:2 1 420px">
+      <div class="lime-top">
+        <div><div class="label">falta pagar em ${MESES[m].toLowerCase()}</div><div class="big num">${brl(falta, 2)}</div></div>
+        <span class="badge">${pagas.length} de ${cs.length} pagas</span>
+      </div>
+      ${totPrev ? `<div class="seg"><span style="flex:${totPago || 0.0001};background:rgba(20,20,20,.85)"></span><span style="flex:${falta || 0.0001};background:rgba(20,20,20,.15)"></span></div>
+      <div class="lg"><span><i style="background:rgba(20,20,20,.85)"></i>pago ${brl(totPago)}</span><span><i style="background:rgba(20,20,20,.15)"></i>a pagar ${brl(falta)}</span></div>` : ''}
+    </div>
+    <div class="kpis k2">
+      <div class="kpi"><span class="k">vencidas</span><span class="v num ${cs.some((c) => c.sit === 'vencida') ? 'neg' : ''}">${cs.filter((c) => c.sit === 'vencida').length}</span></div>
+      <div class="kpi"><span class="k">próximos 7 dias</span><span class="v num">${cs.filter((c) => c.sit === 'proxima').length}</span></div>
+      <div class="kpi"><span class="k">total do mês</span><span class="v num">${brl(totPrev)}</span></div>
+      <div class="kpi"><span class="k">já pago</span><span class="v num pos">${brl(totPago)}</span></div>
+    </div>
+  </section>
+  <section class="cols" style="align-items:flex-start">
+    <div class="tile"><div class="tile-head"><h2>a pagar</h2><span class="muted num" style="font-size:12px">${pendentes.length}</span></div>
+      ${pendentes.length ? grupo('vencidas', pendentes.filter((c) => c.sit === 'vencida'), 'neg') + grupo('próximos 7 dias', pendentes.filter((c) => c.sit === 'proxima'))
+        + grupo('mais para frente', pendentes.filter((c) => c.sit === 'futura')) : '<p class="muted" style="margin:0;font-size:13px">Tudo pago neste mês.</p>'}
+    </div>
+    <div class="tile"><div class="tile-head"><h2>pagas</h2><span class="muted num" style="font-size:12px">${pagas.length}</span></div>
+      ${pagas.length ? `<div class="list">${pagas.map(linha).join('')}</div>` : '<p class="muted" style="margin:0;font-size:13px">Nenhuma conta paga neste mês ainda.</p>'}
+    </div>
+  </section>
+  ${S.contas.some((k) => k.ativa === false) ? `<p class="muted" style="font-size:12px;margin:0">Contas pausadas não aparecem: ${esc(S.contas.filter((k) => k.ativa === false).map((k) => k.descricao).join(', '))}.</p>` : ''}`;
+}
+
+function contaForm(k) {
+  const cats = [...new Set([...S.lancs.map((x) => x.categoria), ...S.contas.map((x) => x.categoria)])].sort();
+  const rec = k.recorrente !== false;
+  modal.innerHTML = `
+  <form method="dialog" id="f-k">
+    <h2 class="h2">${k.id ? 'editar conta' : 'nova conta'}</h2>
+    <label class="field">Descrição<input name="descricao" required value="${esc(k.descricao || '')}" placeholder="Ex.: Energia, Aluguel, Escola"></label>
+    <div class="grid2">
+      <label class="field">Categoria<input name="categoria" list="dl-cat-k" required value="${esc(k.categoria || '')}"></label>
+      <label class="field">Valor previsto (R$)<input name="valor_previsto" type="number" inputmode="decimal" step="0.01" min="0" required value="${k.valor_previsto ?? ''}"></label>
+    </div>
+    <div class="grid2">
+      <label class="field">Repete<select name="recorrente"><option value="true" ${rec ? 'selected' : ''}>Todo mês</option><option value="false" ${rec ? '' : 'selected'}>Só uma vez</option></select></label>
+      <label class="field" id="k-dia" ${rec ? '' : 'hidden'}>Dia do vencimento<input name="dia_vencimento" type="number" inputmode="numeric" min="1" max="31" value="${k.dia_vencimento ?? 10}"></label>
+      <label class="field" id="k-data" ${rec ? 'hidden' : ''}>Vencimento<input name="vencimento" type="date" value="${k.vencimento || ''}"></label>
+    </div>
+    ${k.id ? `<label class="check"><input type="checkbox" name="ativa" ${k.ativa !== false ? 'checked' : ''}> conta ativa (desmarque para pausar sem apagar o histórico)</label>` : ''}
+    <datalist id="dl-cat-k">${cats.map((c) => `<option value="${esc(c)}">`).join('')}</datalist>
+    <div class="error" id="f-err" role="alert"></div>
+    <div class="dialog-actions">${k.id ? '<button class="pill danger" value="del" formnovalidate>Excluir</button>' : ''}<button class="pill" value="cancel" formnovalidate>Cancelar</button><button class="pill green" value="ok">Salvar</button></div>
+  </form>`;
+  const f = modal.querySelector('form');
+  const trocar = () => {
+    const r = f.recorrente.value === 'true';
+    f.querySelector('#k-dia').hidden = !r; f.querySelector('#k-data').hidden = r;
+    f.dia_vencimento.required = r; f.vencimento.required = !r;
+  };
+  f.recorrente.addEventListener('change', trocar);
+  trocar();
+  f.addEventListener('submit', async (ev) => {
+    if (ev.submitter && ev.submitter.value === 'cancel') return;
+    ev.preventDefault();
+    try {
+      if (ev.submitter && ev.submitter.value === 'del') {
+        if (!confirm(`Excluir a conta "${k.descricao}"? Os lançamentos já criados pelos pagamentos continuam em Lançamentos.`)) return;
+        await db.excluirConta(k.id);
+      } else {
+        if (!f.reportValidity()) return;
+        const d = Object.fromEntries(new FormData(f));
+        await db.salvarConta({ ...d, id: k.id, ativa: k.id ? f.ativa.checked : true });
+      }
+      modal.close();
+      await carregarContasOrc();
+      render();
+    } catch (e) { f.querySelector('#f-err').textContent = e.message; }
+  });
+  modal.showModal();
+}
+
+function pagarForm(k, ano, mes) {
+  const ultimo = S.pags.filter((p) => p.conta_id === k.id).sort((a, b) => b.ano * 12 + b.mes - (a.ano * 12 + a.mes))[0];
+  const c = contasDoMes(ano, mes).find((x) => x.k.id === k.id);
+  const hoje = hojeData();
+  const data = c && c.venc < hoje && (hoje.getFullYear() !== ano || hoje.getMonth() + 1 !== mes) ? c.venc : hoje;
+  modal.innerHTML = `
+  <form method="dialog" id="f-pag">
+    <h2 class="h2">pagar ${esc(k.descricao.toLowerCase())}</h2>
+    <p class="muted" style="margin:0;font-size:13px;line-height:1.5">Vai criar um lançamento de saída em <strong>${MESES[mes - 1]} de ${ano}</strong> na categoria <strong>${esc(k.categoria)}</strong>.</p>
+    <div class="grid2">
+      <label class="field">Valor pago (R$)<input name="valor" type="number" inputmode="decimal" step="0.01" min="0" required value="${(ultimo ? ultimo.valor : k.valor_previsto) || ''}"></label>
+      <label class="field">Data do pagamento<input name="pago_em" type="date" required value="${isoDia(data)}"></label>
+    </div>
+    ${ultimo ? `<p class="muted" style="margin:0;font-size:12px">Último pagamento: ${brl(ultimo.valor, 2)} em ${MESES[ultimo.mes - 1].toLowerCase()}.</p>` : ''}
+    <div class="error" id="f-err" role="alert"></div>
+    <div class="dialog-actions"><button class="pill" value="cancel" formnovalidate>Cancelar</button><button class="pill green" value="ok">Confirmar pagamento</button></div>
+  </form>`;
+  const f = modal.querySelector('form');
+  f.addEventListener('submit', async (ev) => {
+    if (ev.submitter && ev.submitter.value === 'cancel') return;
+    ev.preventDefault();
+    if (!f.reportValidity()) return;
+    try {
+      await db.pagarConta({ conta: k, ano, mes, valor: f.valor.value, pago_em: f.pago_em.value });
+      modal.close();
+      await recarregarFinancas();
+      render();
+    } catch (e) { f.querySelector('#f-err').textContent = e.message; }
+  });
+  modal.showModal();
+  f.valor.select();
+}
+
+// gastos do dia a dia que não são "contas com vencimento" (vêm desmarcados)
+const VARIAVEIS = /mercado|supermerc|aliment|delivery|ifood|restaur|lazer|combust|posto|farmac|viagem|compras|vestu|roupa|presente|outr/;
+// "Fixos automáticos": transforma os fixos do último mês com lançamentos em contas recorrentes.
+function contasDosFixos() {
+  const m = mesPadrao() + 1;
+  let pa = S.ano, pm = m, base = [];
+  for (let i = 0; i < 4 && !base.length; i++) {
+    [pa, pm] = pm === 1 ? [pa - 1, 12] : [pa, pm - 1];
+    base = S.lancs.filter((l) => l.ano === pa && l.mes === pm && l.tipo === 'saida' && !l.cartao && !/cart|outr/i.test(l.categoria));
+  }
+  const ja = new Set(S.contas.map((k) => norm(k.descricao)));
+  const vistos = new Set();
+  const novos = base.filter((l) => !ja.has(norm(l.descricao)) && !vistos.has(norm(l.descricao)) && vistos.add(norm(l.descricao))).sort((a, b) => b.valor - a.valor);
+  if (!novos.length) return alert(base.length ? 'Todos os fixos do mês anterior já viraram contas.' : 'Não encontrei despesas fixas nos últimos meses para usar como base.');
+  modal.classList.add('wide');
+  modal.innerHTML = `
+  <form method="dialog" id="f-fixos">
+    <h2 class="h2">criar contas dos fixos</h2>
+    <p class="muted" style="margin:0;font-size:13px;line-height:1.5">Fixos de ${MESES[pm - 1].toLowerCase()} de ${pa}. Marque os que vencem todo mês e ajuste o dia do vencimento. Depois, ao pagar, o lançamento é criado sozinho.</p>
+    <div class="imp-box">${novos.map((l, i) => `
+      <div class="imp-row"><input type="checkbox" name="inc" value="${i}" ${VARIAVEIS.test(norm(`${l.categoria} ${l.descricao}`)) ? '' : 'checked'} aria-label="Criar conta ${esc(l.descricao)}">
+        <div class="li-main"><span class="li-t">${esc(l.descricao)}</span><span class="li-s">${esc(l.categoria)} · ${brl(l.valor, 2)}</span></div>
+        <label class="field" style="width:96px">dia<input name="dia${i}" type="number" inputmode="numeric" min="1" max="31" value="10" aria-label="Dia do vencimento de ${esc(l.descricao)}"></label></div>`).join('')}</div>
+    <div class="error" id="f-err" role="alert"></div>
+    <div class="dialog-actions"><button class="pill" value="cancel" formnovalidate>Cancelar</button><button class="pill green" value="ok">Criar contas</button></div>
+  </form>`;
+  const f = modal.querySelector('form');
+  f.addEventListener('submit', async (ev) => {
+    if (ev.submitter && ev.submitter.value === 'cancel') return;
+    ev.preventDefault();
+    const sel = [...f.querySelectorAll('input[name="inc"]:checked')].map((c) => {
+      const l = novos[+c.value];
+      return { descricao: l.descricao, categoria: l.categoria, valor_previsto: l.valor, recorrente: true, dia_vencimento: Math.min(31, Math.max(1, +f.elements[`dia${c.value}`].value || 10)) };
+    });
+    if (!sel.length) { f.querySelector('#f-err').textContent = 'Marque ao menos uma conta.'; return; }
+    try {
+      await db.salvarContas(sel);
+      modal.close();
+      await carregarContasOrc();
+      if (route() === 'contas') render(); else C.irPara('financas/contas');
+    } catch (e) { f.querySelector('#f-err').textContent = e.message; }
+  });
+  modal.showModal();
+}
+
+// ---------------- Orçamento por categoria ----------------
+function viewOrcamento(el) {
+  const m = mesPadrao(), ano = S.ano, mes = m + 1;
+  const head = '<div class="page-head"><h1>orçamento</h1></div>';
+  if (S.erroExtra) { el.innerHTML = `${head}<div class="empty">${esc(S.erroExtra)}</div>`; return; }
+  const gasto = gastoPorCategoria(ano, mes);
+  const comTeto = S.orc.map((o) => ({ ...o, gasto: gasto.get(o.categoria) || 0 })).sort((a, b) => b.gasto / b.teto - a.gasto / a.teto);
+  const temTeto = new Set(S.orc.map((o) => o.categoria));
+  const cats = [...new Set([...S.lancs.filter((l) => l.ano === ano && l.tipo === 'saida').map((l) => l.categoria)])].filter((c) => !temTeto.has(c))
+    .map((c) => ({ categoria: c, gasto: gasto.get(c) || 0, media: mediaCategoria(c) })).filter((c) => c.gasto > 0 || c.media > 0).sort((a, b) => b.media - a.media);
+  const totTeto = comTeto.reduce((a, o) => a + o.teto, 0);
+  const totGasto = comTeto.reduce((a, o) => a + o.gasto, 0);
+  const acima = comTeto.filter((o) => o.gasto > o.teto).length;
+  const fechou = (() => { const h = new Date(); return ano < h.getFullYear() || (ano === h.getFullYear() && m < h.getMonth()); })();
+  const linhaTeto = (o) => {
+    const p = o.gasto / o.teto;
+    const cls = p > 1 ? 'over' : p >= 0.8 ? 'warn' : 'hi';
+    return `<div class="li tap" data-action="teto" data-cat="${esc(o.categoria)}" style="flex-direction:column;align-items:stretch;gap:8px;padding:12px 0">
+      <div class="bar-row" style="margin:0"><div class="top"><span style="font-weight:500">${esc(o.categoria)}</span>
+        <span class="num"><span class="${p > 1 ? 'neg' : ''}">${brl(o.gasto)}</span><span class="muted"> de ${brl(o.teto)}</span></span></div>
+      <div class="track"><div class="${cls}" style="width:${Math.min(100, Math.max(2, p * 100))}%"></div></div>
+      <div class="li-s ${p > 1 ? 'neg' : ''}">${p > 1 ? `passou ${brl(o.gasto - o.teto)} do teto` : `${Math.round(p * 100)}% · ${fechou ? 'sobrou' : 'ainda dá'} ${brl(o.teto - o.gasto)}`}</div></div>
+    </div>`;
+  };
+  el.innerHTML = `${head}
+  ${chipsMeses(m)}
+  ${comTeto.length ? `<section class="lime-card">
+    <div class="lime-top">
+      <div><div class="label">gasto nas categorias com teto · ${MESES[m].toLowerCase()}</div><div class="big num">${brl(totGasto)} <span style="font-size:.45em;font-weight:500">de ${brl(totTeto)}</span></div></div>
+      <span class="badge">${acima ? `${acima} acima do teto` : 'tudo dentro do teto'}</span>
+    </div>
+    <div class="seg"><span style="flex:${Math.min(totGasto, totTeto) || 0.0001};background:rgba(20,20,20,.85)"></span><span style="flex:${Math.max(0, totTeto - totGasto) || 0.0001};background:rgba(20,20,20,.15)"></span></div>
+  </section>` : ''}
+  <section class="cols" style="align-items:flex-start">
+    <div class="tile">
+      <div class="tile-head"><h2>tetos do mês</h2><span class="muted" style="font-size:12px">toque para ajustar</span></div>
+      ${comTeto.length ? `<div class="list">${comTeto.map(linhaTeto).join('')}</div>`
+        : '<p class="muted" style="margin:0;font-size:13px;line-height:1.6">Defina um teto mensal para as categorias que mais pesam (mercado, delivery, lazer…). O app mostra quanto já foi gasto e avisa no Resumo quando passar de 80%.</p>'}
+    </div>
+    <div class="tile">
+      <div class="tile-head"><h2>sem teto</h2><span class="muted" style="font-size:12px">média/mês em ${S.ano}</span></div>
+      ${cats.length ? `<div class="list">${cats.map((c) => `
+        <div class="li tap" data-action="teto" data-cat="${esc(c.categoria)}">
+          <div class="li-main"><span class="li-t">${esc(c.categoria)}</span><span class="li-s">neste mês ${brl(c.gasto)}</span></div>
+          <div class="li-v num">${brl(c.media)}<small>média</small></div>
+          <button class="btn" data-action="teto" data-cat="${esc(c.categoria)}" style="min-height:36px;padding:0 12px">definir</button></div>`).join('')}</div>`
+        : '<p class="muted" style="margin:0;font-size:13px">Todas as categorias com gastos já têm teto.</p>'}
+    </div>
+  </section>`;
+}
+
+function tetoForm(cat) {
+  const o = S.orc.find((x) => x.categoria === cat);
+  const media = mediaCategoria(cat);
+  modal.innerHTML = `
+  <form method="dialog" id="f-teto">
+    <h2 class="h2">teto de ${esc(cat.toLowerCase())}</h2>
+    <label class="field">Teto mensal (R$)<input name="teto" type="number" inputmode="decimal" step="10" min="0" value="${o ? o.teto : sugerirTeto(media)}"></label>
+    <p class="muted" style="margin:0;font-size:12px;line-height:1.5">${media ? `Média de ${brl(media)}/mês nos meses fechados de ${S.ano}. ` : ''}Deixe em branco ou zero para tirar o teto.</p>
+    <div class="error" id="f-err" role="alert"></div>
+    <div class="dialog-actions">${o ? '<button class="pill danger" value="del" formnovalidate>Remover teto</button>' : ''}<button class="pill" value="cancel" formnovalidate>Cancelar</button><button class="pill green" value="ok">Salvar</button></div>
+  </form>`;
+  const f = modal.querySelector('form');
+  f.addEventListener('submit', async (ev) => {
+    if (ev.submitter && ev.submitter.value === 'cancel') return;
+    ev.preventDefault();
+    try {
+      await db.salvarOrcamento(cat, ev.submitter && ev.submitter.value === 'del' ? 0 : f.teto.value);
+      modal.close();
+      await carregarContasOrc();
+      render();
+    } catch (e) { f.querySelector('#f-err').textContent = e.message; }
+  });
+  modal.showModal();
+  f.teto.select();
+}
+
 // ---------------- o módulo ----------------
-const VIEWS = { resumo: viewResumo, lancamentos: viewLancamentos, cartoes: viewCartoes, investimentos: viewInvestimentos, calculadoras: viewCalculadoras, dicas: viewDicas };
+const VIEWS = { resumo: viewResumo, lancamentos: viewLancamentos, contas: viewContas, orcamento: viewOrcamento, cartoes: viewCartoes, investimentos: viewInvestimentos, calculadoras: viewCalculadoras, dicas: viewDicas };
 
 export default {
   id: 'financas',
   nome: 'Finanças',
-  abas: [['resumo', 'Resumo', 'resumo'], ['lancamentos', 'Lançamentos', 'lancamentos'], ['cartoes', 'Cartões', 'cartoes'],
-    ['investimentos', 'Investimentos', 'investimentos'], ['calculadoras', 'Calculadoras', 'calculadoras'], ['dicas', 'Dicas', 'dicas']],
+  abas: [['resumo', 'Resumo', 'resumo'], ['lancamentos', 'Lançamentos', 'lancamentos'], ['contas', 'Contas', 'contas'], ['orcamento', 'Orçamento', 'orcamento'],
+    ['cartoes', 'Cartões', 'cartoes'], ['investimentos', 'Investimentos', 'investimentos'], ['calculadoras', 'Calculadoras', 'calculadoras'], ['dicas', 'Dicas', 'dicas']],
   // barra inferior no celular (5 itens): abas ou uma ação rápida
-  barra: ['resumo', 'lancamentos', { acao: 'novo-l', icone: 'plus', rotulo: 'Novo lançamento', attrs: 'data-tipo="saida"' }, 'cartoes', 'investimentos'],
+  barra: ['resumo', 'lancamentos', { acao: 'novo-l', icone: 'plus', rotulo: 'Novo lançamento', attrs: 'data-tipo="saida"' }, 'contas', 'orcamento'],
 
   async carregar(ctx) {
     C = ctx;
-    [S.lancs, S.invs] = await Promise.all([db.listLancamentos(), db.listInvestimentos()]);
+    [S.lancs, S.invs] = await Promise.all([db.listLancamentos(), db.listInvestimentos(), carregarContasOrc()]);
     const anos = anosDisponiveis();
     if (!anos.includes(S.ano)) S.ano = anos[anos.length - 1];
   },
@@ -809,6 +1155,22 @@ export default {
       copiarMesAnterior();
     } else if (a === 'importar') {
       escolherFatura();
+    } else if (a === 'nova-k') {
+      contaForm({ recorrente: true });
+    } else if (a === 'edit-k') {
+      contaForm(S.contas.find((k) => k.id === +b.dataset.id));
+    } else if (a === 'pagar-k') {
+      pagarForm(S.contas.find((k) => k.id === +b.dataset.id), S.ano, mesPadrao() + 1);
+    } else if (a === 'desfazer-pag') {
+      const p = S.pags.find((x) => x.id === +b.dataset.id);
+      const k = p && S.contas.find((x) => x.id === p.conta_id);
+      if (p && confirm(`Desfazer o pagamento de "${k ? k.descricao : 'conta'}" em ${MESES[p.mes - 1]}? O lançamento de ${brl(p.valor, 2)} criado por ele também será apagado.`)) {
+        await db.desfazerPagamento(p); await recarregarFinancas(); render();
+      }
+    } else if (a === 'contas-fixos') {
+      contasDosFixos();
+    } else if (a === 'teto') {
+      tetoForm(b.dataset.cat);
     } else if (a === 'novo-i') {
       invForm({ tipo: TIPOS_INV[0] });
     } else if (a === 'edit-i') {

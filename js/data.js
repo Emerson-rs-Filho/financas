@@ -144,6 +144,112 @@ export async function deleteInvestimento(id) {
   if (error) throw error;
 }
 
+// ---------- orçamento por categoria e contas a pagar ----------
+const demoArr = (k) => (demo[k] || (demo[k] = []));
+const semTabela = (error, nome) => new Error(error.message && error.message.includes(nome)
+  ? `A tabela "${nome}" ainda não existe. Rode de novo o arquivo supabase/schema.sql no SQL Editor do Supabase.` : error.message);
+const numeros = (rows) => rows.map((r) => {
+  const o = { ...r };
+  ['teto', 'valor_previsto', 'valor'].forEach((k) => { if (o[k] != null) o[k] = Number(o[k]); });
+  return o;
+});
+async function tabela(nome) {
+  const c = await client();
+  const { data, error } = await c.from(nome).select('*').order('id');
+  if (error) throw semTabela(error, nome);
+  return numeros(data);
+}
+
+export async function listOrcamentos() {
+  if (DEMO) return demoArr('orcamentos').slice();
+  return tabela('orcamentos');
+}
+
+// teto vazio ou zero remove o teto da categoria
+export async function salvarOrcamento(categoria, teto) {
+  teto = +teto || 0;
+  if (DEMO) {
+    const a = demoArr('orcamentos');
+    const i = a.findIndex((x) => x.categoria === categoria);
+    if (!teto) { if (i >= 0) a.splice(i, 1); } else if (i >= 0) a[i].teto = teto; else a.push({ id: demo.nextId++, categoria, teto });
+    demoSave();
+    return;
+  }
+  const c = await client();
+  const { error } = teto
+    ? await c.from('orcamentos').upsert({ categoria, teto }, { onConflict: 'categoria' })
+    : await c.from('orcamentos').delete().eq('categoria', categoria);
+  if (error) throw semTabela(error, 'orcamentos');
+}
+
+export async function listContas() {
+  if (DEMO) return { contas: demoArr('contas').slice(), pagamentos: demoArr('contas_pagamentos').slice() };
+  const [contas, pagamentos] = await Promise.all([tabela('contas'), tabela('contas_pagamentos')]);
+  return { contas, pagamentos };
+}
+
+export async function salvarConta(k) {
+  const recorrente = k.recorrente !== false && k.recorrente !== 'false';
+  const row = { descricao: k.descricao.trim(), categoria: k.categoria.trim(), valor_previsto: +k.valor_previsto || 0, recorrente,
+    dia_vencimento: recorrente ? +k.dia_vencimento : null, vencimento: recorrente ? null : (k.vencimento || null), ativa: k.ativa !== false };
+  if (DEMO) {
+    const a = demoArr('contas');
+    if (k.id) Object.assign(a.find((x) => x.id === +k.id), row); else a.push({ id: demo.nextId++, ...row, criado_em: new Date().toISOString() });
+    demoSave();
+    return;
+  }
+  const c = await client();
+  const { error } = k.id ? await c.from('contas').update(row).eq('id', k.id) : await c.from('contas').insert(row);
+  if (error) throw semTabela(error, 'contas');
+}
+
+export async function salvarContas(lista) {
+  for (const k of lista) await salvarConta(k);
+}
+
+export async function excluirConta(id) {
+  if (DEMO) {
+    demo.contas = demoArr('contas').filter((x) => x.id !== +id);
+    demo.contas_pagamentos = demoArr('contas_pagamentos').filter((p) => p.conta_id !== +id);
+    demoSave();
+    return;
+  }
+  const c = await client();
+  const { error } = await c.from('contas').delete().eq('id', id);
+  if (error) throw error;
+}
+
+// Paga a conta no mês: cria o lançamento de saída e registra o pagamento ligado a ele.
+export async function pagarConta({ conta, ano, mes, valor, pago_em }) {
+  const lanc = { ano: +ano, mes: +mes, tipo: 'saida', descricao: conta.descricao, categoria: conta.categoria, valor: +valor };
+  if (DEMO) {
+    const lancamento_id = demo.nextId++;
+    demo.lancamentos.push({ id: lancamento_id, ...lanc });
+    demoArr('contas_pagamentos').push({ id: demo.nextId++, conta_id: conta.id, ano: +ano, mes: +mes, pago_em, valor: +valor, lancamento_id });
+    demoSave();
+    return;
+  }
+  const c = await client();
+  const { data, error } = await c.from('lancamentos').insert(lanc).select('id').single();
+  if (error) throw error;
+  const { error: e2 } = await c.from('contas_pagamentos').insert({ conta_id: conta.id, ano: +ano, mes: +mes, pago_em, valor: +valor, lancamento_id: data.id });
+  if (e2) { await c.from('lancamentos').delete().eq('id', data.id); throw semTabela(e2, 'contas_pagamentos'); }
+}
+
+// Desfaz o pagamento e apaga o lançamento que ele criou.
+export async function desfazerPagamento(p) {
+  if (DEMO) {
+    demo.contas_pagamentos = demoArr('contas_pagamentos').filter((x) => x.id !== p.id);
+    if (p.lancamento_id) demo.lancamentos = demo.lancamentos.filter((l) => l.id !== p.lancamento_id);
+    demoSave();
+    return;
+  }
+  const c = await client();
+  const { error } = await c.from('contas_pagamentos').delete().eq('id', p.id);
+  if (error) throw error;
+  if (p.lancamento_id) await c.from('lancamentos').delete().eq('id', p.lancamento_id);
+}
+
 // ---------- cotações (Edge Function "cotacoes") ----------
 const TAXAS_DEMO = { selic: { valor: 13.75, data: '' }, cdi: { valor: 13.65, data: '' }, ipca: { valor: 4.6, data: '' }, exemplo: true };
 

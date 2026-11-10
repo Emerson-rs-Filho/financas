@@ -3,7 +3,7 @@
 App web para gerenciar a casa. Depois do login aparece a tela inicial com as **áreas da casa**:
 
 - **Finanças** — resumo do ano com gráficos, lançamentos mês a mês, cartões (com importação da fatura do Nubank), investimentos, calculadoras e dicas de economia.
-- **Calendário** — em breve.
+- **Calendário** — a agenda da família, conectada ao Google Agenda.
 - **Lista de compras** — compartilhada entre vocês dois, atualiza na hora nos dois celulares e recebe itens pela Alexa ("Alexa, peça à nossa casa para adicionar leite").
 
 Tem modo claro e escuro, funciona no celular e no computador, e o login é com e-mail e senha.
@@ -121,7 +121,11 @@ Depois de entrar, escolha a área na tela inicial. Para trocar de área: no comp
 
 - **Resumo:** saldo do ano, gráfico de entradas e saídas, para onde foi o dinheiro e as principais dicas.
 - **Lançamentos:** escolha o mês, adicione, edite ou exclua. O botão *Copiar fixos do mês anterior* copia as contas fixas (sem cartões e "outras") para você só ajustar os valores.
+- **Contas:** as contas com vencimento (aluguel, luz, internet, escola…). Para cada mês mostra o que está vencido, o que vence nos próximos 7 dias e o que já foi pago. **Pagar** cria o lançamento de saída sozinho (com o valor e a data que você confirmar); **desfazer** apaga o pagamento e o lançamento. *Criar dos fixos* transforma os fixos do mês anterior em contas recorrentes — a partir daí não precisa mais copiar fixos (o botão de copiar passa a ignorar o que já é conta, para não lançar em dobro). Uma conta pode ser mensal ou avulsa, e pode ser pausada sem perder o histórico.
+- **Orçamento:** teto mensal por categoria (mercado, delivery, lazer…). Mostra quanto já foi gasto no mês, com barra verde até 80%, laranja até 100% e vermelha acima. A sugestão de teto é a média mensal da categoria no ano. O **Resumo** avisa no topo quando há conta vencida ou vencendo em até 3 dias e quando uma categoria passa de 80% do teto.
 - **Cartões:** faturas por mês, comparação entre os cartões e, para faturas importadas, os gastos do cartão por categoria.
+
+> **Já usa o app?** Para ativar Contas e Orçamento, rode de novo o `supabase/schema.sql` no SQL Editor (cria as tabelas `orcamentos`, `contas` e `contas_pagamentos`; não mexe nos dados).
 - **Importar fatura (Nubank):** no app do Nubank, abra a fatura e exporte em CSV (arquivo `Nubank_AAAA-MM-DD.csv`). Em *Lançamentos* ou *Cartões*, clique em **Importar fatura** e escolha o arquivo. Cada compra vira um lançamento no mês da fatura (data do nome do arquivo), com categoria sugerida; revise e clique em *Importar*. O pagamento da fatura anterior é ignorado, estornos entram negativos e importar o mesmo arquivo de novo não duplica nada. As categorias que vocês corrigirem são lembradas nas próximas faturas. Se o mês já tiver uma linha "Nubank" com o total da fatura, o app oferece removê-la para não contar em dobro.
 
 > **Já usa o app?** Para ativar a importação, rode de novo o `supabase/schema.sql` inteiro no **SQL Editor** do Supabase. Ele só adiciona as colunas novas (`cartao`, `data_compra`, `import_key`) e não mexe nos dados.
@@ -205,4 +209,3 @@ supabase/seed_2026.sql dados iniciais
 - Calendário: editar eventos pelo app e mostrar as contas a vencer do módulo Finanças
 - Importar as abas de 2023 e 2025 e os detalhes dos cartões
 - Importar faturas de outros bancos
-- Metas de gasto por categoria, com alerta quando passar
