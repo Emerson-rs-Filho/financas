@@ -48,6 +48,31 @@ export function porItem(r, tipo = 'saida') {
   });
 }
 
+// Lançamento de cartão: compra importada (tem `cartao`) ou linha antiga com o total da fatura.
+export const ehCartao = (l) => !!l.cartao || /cart/i.test(l.categoria);
+
+// Totais por cartão: compras importadas somam no cartão de origem; linhas antigas pelo nome.
+export function porCartao(r, n = r.n) {
+  const m = new Map();
+  r.L.filter((l) => l.tipo === 'saida' && ehCartao(l)).forEach((l) => {
+    const nome = l.cartao || l.descricao;
+    if (!m.has(nome)) m.set(nome, { nome, meses: Array(12).fill(0) });
+    m.get(nome).meses[l.mes - 1] += l.valor;
+  });
+  return [...m.values()].map((it) => {
+    const fech = it.meses.slice(0, n);
+    return { ...it, total: sum(fech), mediaAtivos: avg(fech.filter((v) => v > 0)) };
+  });
+}
+
+// Gastos dentro do cartão, por categoria (só compras importadas). Usa todos os meses do ano.
+export function cartaoPorCategoria(r) {
+  const m = new Map();
+  r.L.filter((l) => l.tipo === 'saida' && l.cartao).forEach((l) => m.set(l.categoria, (m.get(l.categoria) || 0) + l.valor));
+  const tot = sum([...m.values()]);
+  return [...m.entries()].map(([nome, valor]) => ({ nome, valor, pct: tot ? valor / tot : 0 })).sort((a, b) => b.valor - a.valor);
+}
+
 export function dicas(r) {
   const out = [];
   if (r.n < 2) return out;

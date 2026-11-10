@@ -114,8 +114,31 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
 dialog form { display: flex; flex-direction: column; gap: 14px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
 
+/* ---------- importação / compras do cartão ---------- */
+dialog.wide { width: min(940px, calc(100vw - 32px)); }
+.grid3 { display: grid; grid-template-columns: 2fr 1.4fr 1fr; gap: 12px; }
+.imp-box { max-height: 52vh; overflow: auto; border: 1px solid var(--border); border-radius: 12px; }
+.imp-box table { min-width: 640px; }
+.imp-box thead th { position: sticky; top: 0; background: var(--surface); z-index: 1; }
+.imp-box td { padding: 6px 8px; }
+.imp-box input[type="text"] { width: 100%; min-width: 140px; min-height: 36px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); }
+.imp-box input[type="checkbox"], .check input { width: 18px; height: 18px; accent-color: var(--inc); }
+.imp-box tr.off td { opacity: 0.45; }
+.check { display: flex; gap: 10px; align-items: center; font-size: 14px; }
+.check[hidden] { display: none; }
+.imp-total { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; font-size: 14px; }
+details.group { border: 1px solid var(--border); border-radius: 16px; background: var(--surface); margin-bottom: 12px; }
+details.group > summary { cursor: pointer; list-style: none; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 16px; padding: 14px 18px; min-height: 44px; }
+details.group > summary::-webkit-details-marker { display: none; }
+details.group > summary .nm::before { content: '▸'; display: inline-block; width: 18px; color: var(--muted); transition: transform 0.15s; }
+details.group[open] > summary .nm::before { transform: rotate(90deg); }
+details.group[open] > summary { border-bottom: 1px solid var(--border); }
+details.group > summary:focus-visible { outline: 2px solid var(--inc); outline-offset: 2px; border-radius: 16px; }
+details.group .table-box { padding: 0 10px 6px; }
+
 @media (max-width: 640px) {
   .month-strip { grid-template-columns: repeat(6, minmax(0, 1fr)); row-gap: 10px; }
-  .grid2 { grid-template-columns: 1fr; }
+  .grid2, .grid3 { grid-template-columns: 1fr; }
+  dialog { padding: 20px 16px; }
   .hero p { font-size: 16px; }
 }

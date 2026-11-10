@@ -1,11 +1,14 @@
 import * as db from './data.js';
 import { NOME_CASA } from './config.js';
-import { MESES, MES_CURTO, brl, kfmt, resumoAno, porCategoria, porItem, dicas, potencial, closedMonths } from './insights.js';
+import { MESES, MES_CURTO, brl, kfmt, resumoAno, porCategoria, porItem, dicas, potencial, closedMonths, ehCartao, porCartao, cartaoPorCategoria } from './insights.js';
+import { parseNubankCsv, chaveLoja } from './importar.js';
+import * as calc from './calc.js';
 
 const app = document.getElementById('app');
 const modal = document.getElementById('modal');
-const S = { user: null, lancs: [], invs: [], ano: new Date().getFullYear(), mes: null, charts: [] };
-const TABS = [['resumo', 'Resumo'], ['lancamentos', 'Lançamentos'], ['cartoes', 'Cartões'], ['investimentos', 'Investimentos'], ['dicas', 'Dicas']];
+const S = { user: null, lancs: [], invs: [], ano: new Date().getFullYear(), mes: null, charts: [],
+  calc: 'meta', calcIn: {}, taxas: null, taxasErr: '', hist: null };
+const TABS = [['resumo', 'Resumo'], ['lancamentos', 'Lançamentos'], ['cartoes', 'Cartões'], ['investimentos', 'Investimentos'], ['calculadoras', 'Calculadoras'], ['dicas', 'Dicas']];
 const TIPOS_INV = ['Reserva de emergência', 'Tesouro Direto', 'CDB / LCI / LCA', 'Fundos', 'Ações / FIIs', 'Previdência', 'Outros'];
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -92,7 +95,7 @@ function render() {
   </div></header>
   <main class="wrap" id="view"></main>`;
   const view = document.getElementById('view');
-  ({ resumo: viewResumo, lancamentos: viewLancamentos, cartoes: viewCartoes, investimentos: viewInvestimentos, dicas: viewDicas }[r] || viewResumo)(view);
+  ({ resumo: viewResumo, lancamentos: viewLancamentos, cartoes: viewCartoes, investimentos: viewInvestimentos, calculadoras: viewCalculadoras, dicas: viewDicas }[r] || viewResumo)(view);
 }
 
 // ---------------- Resumo ----------------
@@ -134,7 +137,7 @@ function viewResumo(el) {
   <section class="cols">
     <div>
       <h2 class="h2" style="margin-bottom:18px">Para onde foi</h2>
-      ${cats.map((c, i) => `
+      ${cats.filter((c) => c.valor > 0).map((c, i) => `
         <div class="bar-row"><div class="top"><span style="font-weight:500">${esc(c.nome)}</span><span class="num"><span class="muted">${Math.round(c.pct * 100)}% · </span>${brl(c.valor)}</span></div>
         <div class="track"><div style="width:${Math.max(2, c.valor / cats[0].valor * 100)}%;background:${i === 0 ? 'var(--out)' : 'var(--inc)'}"></div></div></div>`).join('')}
     </div>
@@ -182,7 +185,11 @@ function viewLancamentos(el) {
   const m = S.mes;
   const doMes = r.L.filter((l) => l.mes === m + 1);
   const ent = doMes.filter((l) => l.tipo === 'entrada').sort((a, b) => b.valor - a.valor);
-  const sai = doMes.filter((l) => l.tipo === 'saida').sort((a, b) => b.valor - a.valor);
+  const sai = doMes.filter((l) => l.tipo === 'saida');
+  const saiFixas = sai.filter((l) => !ehCartao(l)).sort((a, b) => b.valor - a.valor);
+  const saiCart = sai.filter(ehCartao).sort((a, b) => b.valor - a.valor);
+  const totalFixas = saiFixas.reduce((a, l) => a + l.valor, 0);
+  const totalCart = saiCart.reduce((a, l) => a + l.valor, 0);
   const itens = porItem(r);
   const media = new Map(itens.map((it) => [it.nome, it.mediaAtivos]));
   const table = (rows, tipo) => rows.length ? `
@@ -197,23 +204,61 @@ function viewLancamentos(el) {
       <tfoot><tr><td colspan="2">Total</td><td class="r num">${brl(rows.reduce((a, l) => a + l.valor, 0), 2)}</td><td colspan="${tipo === 'saida' ? 2 : 1}"></td></tr></tfoot>
     </table></div>` : '<div class="empty">Nada lançado ainda.</div>';
 
+  // Compras importadas: um grupo recolhível por cartão; linhas antigas de total ficam na tabela de sempre.
+  const dataCurta = (d) => (d ? `${d.slice(8, 10)}/${d.slice(5, 7)}` : '');
+  const compras = (ls) => `<div class="table-box"><table>
+      <thead><tr><th>Data</th><th>Descrição</th><th>Categoria</th><th class="r">Valor</th><th class="r"><span style="position:absolute;left:-9999px">Ações</span></th></tr></thead>
+      <tbody>${ls.map((l) => `<tr><td class="num muted" style="white-space:nowrap">${dataCurta(l.data_compra)}</td><td style="font-weight:500">${esc(l.descricao)}</td><td><span class="tag">${esc(l.categoria)}</span></td>
+        <td class="r num" style="font-weight:600;${l.valor < 0 ? 'color:var(--inc)' : ''}">${brl(l.valor, 2)}</td>
+        <td><div class="row-actions"><button data-action="edit-l" data-id="${l.id}" aria-label="Editar ${esc(l.descricao)}">Editar</button><button data-action="del-l" data-id="${l.id}" aria-label="Excluir ${esc(l.descricao)}">Excluir</button></div></td></tr>`).join('')}</tbody>
+    </table></div>`;
+  const grupos = new Map();
+  saiCart.filter((l) => l.cartao).forEach((l) => { if (!grupos.has(l.cartao)) grupos.set(l.cartao, []); grupos.get(l.cartao).push(l); });
+  const antigos = saiCart.filter((l) => !l.cartao);
+  const cartHtml = !saiCart.length ? '<div class="empty">Nada lançado ainda. Use <strong>Importar fatura</strong> para trazer as compras do Nubank.</div>'
+    : (antigos.length ? table(antigos, 'saida') : '') + [...grupos].map(([nome, ls]) => {
+      ls.sort((a, b) => String(a.data_compra).localeCompare(String(b.data_compra)) || b.valor - a.valor);
+      const tot = ls.reduce((a, l) => a + l.valor, 0);
+      const cats = [...ls.reduce((m, l) => m.set(l.categoria, (m.get(l.categoria) || 0) + l.valor), new Map())].filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).slice(0, 3);
+      return `<details class="group"><summary>
+          <span><span class="nm" style="font-weight:600">${esc(nome)}</span> <span class="muted" style="font-size:13px">· ${ls.length} ${ls.length > 1 ? 'lançamentos' : 'lançamento'}${cats.length ? ' · ' + cats.map(([c, v]) => `${esc(c)} ${brl(v)}`).join(', ') : ''}</span></span>
+          <span class="num" style="font-weight:700">${brl(tot, 2)}</span></summary>${compras(ls)}</details>`;
+    }).join('');
+
   el.innerHTML = `
   <section>
     <div class="section-head"><h1 class="h2">Lançamentos de ${S.ano}</h1>
       <div class="actions" style="flex-wrap:wrap">
         <button class="pill" data-action="copiar-mes">Copiar fixos do mês anterior</button>
+        <button class="pill" data-action="importar">Importar fatura</button>
         <button class="pill green" data-action="novo-l" data-tipo="saida">+ Novo lançamento</button>
       </div></div>
     <div class="chips" role="group" aria-label="Mês">${MES_CURTO.map((nm, i) => `<button class="chip" data-action="mes" data-mes="${i}" aria-pressed="${i === m}"><span style="font-weight:600;font-size:14px">${nm}</span><small class="num" style="color:${r.dif[i] >= 0 ? 'var(--inc)' : 'var(--out)'}">${r.E[i] || r.S[i] ? kfmt(r.dif[i]) : '—'}</small></button>`).join('')}</div>
   </section>
   <section class="kpis">
     <div class="kpi"><div class="muted" style="font-size:13px">Entradas · ${MESES[m]}</div><div class="v num" style="color:var(--inc)">${brl(r.E[m])}</div></div>
-    <div class="kpi"><div class="muted" style="font-size:13px">Saídas · ${MESES[m]}</div><div class="v num" style="color:var(--out)">${brl(r.S[m])}</div></div>
+    <div class="kpi"><div class="muted" style="font-size:13px">Fixas · ${MESES[m]}</div><div class="v num" style="color:var(--out)">${brl(totalFixas)}</div></div>
+    <div class="kpi"><div class="muted" style="font-size:13px">Cartões · ${MESES[m]}</div><div class="v num" style="color:var(--out)">${brl(totalCart)}</div></div>
+    <div class="kpi"><div class="muted" style="font-size:13px">Total saídas · ${MESES[m]}</div><div class="v num" style="color:var(--out)">${brl(r.S[m])}</div></div>
     <div class="kpi"><div class="muted" style="font-size:13px">Sobrou${m >= r.n ? ' (previsto)' : ''}</div><div class="v num">${r.dif[m] >= 0 ? '+' : '−'}${brl(Math.abs(r.dif[m]))}</div></div>
   </section>
-  <section class="cols">
-    <div style="flex:1 1 100%"><h2 class="h2" style="font-size:22px;margin-bottom:10px">Saídas</h2>${table(sai, 'saida')}</div>
-    <div style="flex:1 1 100%"><h2 class="h2" style="font-size:22px;margin-bottom:10px">Entradas</h2>${table(ent, 'entrada')}</div>
+  <section>
+    <div class="section-head" style="margin-bottom:10px">
+      <h2 class="h2" style="font-size:22px">Despesas fixas</h2>
+      <span class="num" style="font-size:15px;font-weight:600;color:var(--out)">${brl(totalFixas)}</span>
+    </div>
+    ${table(saiFixas, 'saida')}
+  </section>
+  <section>
+    <div class="section-head" style="margin-bottom:10px">
+      <h2 class="h2" style="font-size:22px">Cartões de crédito</h2>
+      <span class="num" style="font-size:15px;font-weight:600;color:var(--out)">${brl(totalCart)}</span>
+    </div>
+    ${cartHtml}
+  </section>
+  <section>
+    <h2 class="h2" style="font-size:22px;margin-bottom:10px">Entradas</h2>
+    ${table(ent, 'entrada')}
   </section>`;
 }
 
@@ -224,9 +269,12 @@ function lancForm(l) {
   <form method="dialog" id="f-l">
     <h2 class="h2" style="font-size:24px">${l.id ? 'Editar' : 'Novo'} lançamento</h2>
     <input type="hidden" name="id" value="${l.id || ''}">
+    <input type="hidden" name="cartao" value="${esc(l.cartao || '')}">
+    <input type="hidden" name="data_compra" value="${esc(l.data_compra || '')}">
+    ${l.cartao ? `<p class="muted" style="margin:0;font-size:13px">Compra no cartão ${esc(l.cartao)}${l.data_compra ? ` em ${l.data_compra.split('-').reverse().join('/')}` : ''}.</p>` : ''}
     <div class="grid2">
       <label class="field">Tipo<select name="tipo"><option value="saida" ${l.tipo === 'saida' ? 'selected' : ''}>Saída</option><option value="entrada" ${l.tipo === 'entrada' ? 'selected' : ''}>Entrada</option></select></label>
-      <label class="field">Valor (R$)<input name="valor" type="number" step="0.01" min="0.01" required value="${l.valor ?? ''}"></label>
+      <label class="field">Valor (R$)<input name="valor" type="number" step="0.01" ${l.cartao ? '' : 'min="0.01"'} required value="${l.valor ?? ''}"></label>
     </div>
     <label class="field">Descrição<input name="descricao" list="dl-desc" required value="${esc(l.descricao || '')}"></label>
     <label class="field">Categoria<input name="categoria" list="dl-cat" required value="${esc(l.categoria || '')}"></label>
@@ -261,7 +309,7 @@ function lancForm(l) {
 async function copiarMesAnterior() {
   const m = S.mes + 1;
   const [pa, pm] = m === 1 ? [S.ano - 1, 12] : [S.ano, m - 1];
-  const prev = S.lancs.filter((l) => l.ano === pa && l.mes === pm && l.tipo === 'saida' && !/cart|outr/i.test(l.categoria));
+  const prev = S.lancs.filter((l) => l.ano === pa && l.mes === pm && l.tipo === 'saida' && !l.cartao && !/cart|outr/i.test(l.categoria));
   const ja = new Set(S.lancs.filter((l) => l.ano === S.ano && l.mes === m).map((l) => l.descricao));
   const novos = prev.filter((l) => !ja.has(l.descricao));
   if (!novos.length) return alert('Nada para copiar: os fixos do mês anterior já estão neste mês.');
@@ -271,11 +319,114 @@ async function copiarMesAnterior() {
   render();
 }
 
+// ---------------- Importar fatura (CSV do Nubank) ----------------
+function escolherFatura() {
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = '.csv,text/csv';
+  inp.addEventListener('change', async () => {
+    const file = inp.files[0];
+    if (!file) return;
+    // categoria mais recente usada para cada loja em compras de cartão já salvas
+    const hist = new Map();
+    S.lancs.filter((l) => l.cartao).sort((a, b) => a.id - b.id).forEach((l) => hist.set(chaveLoja(l.descricao), l.categoria));
+    try { importForm(parseNubankCsv(await file.text(), file.name, hist), file.name); } catch (e) { alert(e.message); }
+  });
+  inp.click();
+}
+
+function importForm(p, fileName) {
+  const ja = new Set(S.lancs.map((l) => l.import_key).filter(Boolean));
+  const cats = [...new Set([...S.lancs.map((x) => x.categoria), ...p.linhas.map((l) => l.categoria)])].sort();
+  const dataCurta = (d) => `${d.slice(8, 10)}/${d.slice(5, 7)}`;
+  modal.classList.add('wide');
+  modal.innerHTML = `
+  <form method="dialog" id="f-imp">
+    <h2 class="h2" style="font-size:24px">Importar fatura</h2>
+    <p class="muted" style="margin:0;font-size:14px;line-height:1.5">${esc(fileName)} · ${p.linhas.length} lançamentos${p.ignoradas.length ? ` · ${p.ignoradas.length} pagamento da fatura anterior ignorado` : ''}. Confira as categorias sugeridas antes de salvar — as que você corrigir serão lembradas na próxima fatura.</p>
+    <div class="grid3">
+      <label class="field">Cartão<input name="cartao" required value="Nubank"></label>
+      <label class="field">Lançar no mês<select name="mes">${MESES.map((nm, i) => `<option value="${i + 1}" ${p.mes === i + 1 ? 'selected' : ''}>${nm}</option>`).join('')}</select></label>
+      <label class="field">Ano<input name="ano" type="number" required value="${p.ano}"></label>
+    </div>
+    <div class="imp-box"><table>
+      <thead><tr><th style="width:36px"><input type="checkbox" id="imp-all" aria-label="Selecionar todos" checked></th><th>Data</th><th>Descrição</th><th>Categoria</th><th class="r">Valor</th></tr></thead>
+      <tbody>${p.linhas.map((l, i) => {
+        const dup = ja.has(l.import_key);
+        return `<tr class="${dup ? 'off' : ''}"><td><input type="checkbox" name="inc" value="${i}" ${dup ? '' : 'checked'} aria-label="Incluir ${esc(l.titulo)}"></td>
+          <td class="num muted" style="white-space:nowrap">${dataCurta(l.data)}</td>
+          <td>${esc(l.titulo)}${dup ? ' <span class="tag">já importada</span>' : ''}</td>
+          <td><input type="text" name="cat${i}" list="dl-cat-imp" value="${esc(l.categoria)}" aria-label="Categoria de ${esc(l.titulo)}"></td>
+          <td class="r num" style="font-weight:600;white-space:nowrap;${l.valor < 0 ? 'color:var(--inc)' : ''}">${brl(l.valor, 2)}</td></tr>`;
+      }).join('')}</tbody>
+    </table></div>
+    <div class="imp-total"><span class="muted" id="imp-n"></span><span>Total selecionado: <strong class="num" id="imp-tot"></strong></span></div>
+    <label class="check" id="imp-old-wrap" hidden><input type="checkbox" name="rmold" checked><span id="imp-old"></span></label>
+    <datalist id="dl-cat-imp">${cats.map((c) => `<option value="${esc(c)}">`).join('')}</datalist>
+    <div class="error" id="f-err" role="alert"></div>
+    <div class="dialog-actions"><button class="pill" value="cancel" formnovalidate>Cancelar</button><button class="pill green" value="ok" id="imp-ok">Importar</button></div>
+  </form>`;
+  const f = modal.querySelector('form');
+  const incs = [...f.querySelectorAll('input[name="inc"]')];
+  const totaisAntigos = () => {
+    const nome = f.cartao.value.trim().toLowerCase();
+    return S.lancs.filter((l) => l.ano === +f.ano.value && l.mes === +f.mes.value && l.tipo === 'saida' && !l.cartao && ehCartao(l)
+      && nome && l.descricao.toLowerCase().includes(nome));
+  };
+  const atualizar = () => {
+    const sel = incs.filter((c) => c.checked);
+    incs.forEach((c) => c.closest('tr').classList.toggle('off', !c.checked));
+    f.querySelector('#imp-all').checked = sel.length === incs.length;
+    f.querySelector('#imp-n').textContent = `${sel.length} de ${incs.length} selecionados`;
+    f.querySelector('#imp-tot').textContent = brl(sel.reduce((a, c) => a + p.linhas[+c.value].valor, 0), 2);
+    f.querySelector('#imp-ok').textContent = sel.length ? `Importar ${sel.length}` : 'Importar';
+    const old = totaisAntigos();
+    f.querySelector('#imp-old-wrap').hidden = !old.length;
+    if (old.length) f.querySelector('#imp-old').textContent = `Remover ${old.map((l) => `“${l.descricao}” (${brl(l.valor, 2)})`).join(', ')} já lançado em ${MESES[+f.mes.value - 1]}, para não contar a fatura em dobro`;
+  };
+  f.querySelector('#imp-all').addEventListener('change', (ev) => { incs.forEach((c) => { c.checked = ev.target.checked; }); atualizar(); });
+  f.addEventListener('change', atualizar);
+  f.addEventListener('input', (ev) => { if (ev.target.name === 'cartao' || ev.target.name === 'ano') atualizar(); });
+  atualizar();
+
+  f.addEventListener('submit', async (ev) => {
+    if (ev.submitter && ev.submitter.value === 'cancel') return;
+    ev.preventDefault();
+    if (!f.reportValidity()) return;
+    const err = f.querySelector('#f-err');
+    const ano = +f.ano.value, mes = +f.mes.value, cartao = f.cartao.value.trim();
+    const rows = incs.filter((c) => c.checked).map((c) => {
+      const l = p.linhas[+c.value];
+      return { ano, mes, tipo: 'saida', descricao: l.titulo, categoria: f.elements[`cat${c.value}`].value.trim() || 'Outros (cartão)',
+        valor: l.valor, cartao, data_compra: l.data, import_key: l.import_key };
+    });
+    if (!rows.length) { err.textContent = 'Selecione ao menos um lançamento.'; return; }
+    const ok = f.querySelector('#imp-ok');
+    ok.disabled = true; ok.textContent = 'Importando…';
+    try {
+      await db.importLancamentos(rows);
+      if (f.rmold.checked && !f.querySelector('#imp-old-wrap').hidden) for (const l of totaisAntigos()) await db.deleteLancamento(l.id);
+      modal.close();
+      S.lancs = await db.listLancamentos();
+      S.ano = ano; S.mes = mes - 1;
+      if (route() === 'lancamentos') render(); else location.hash = '#lancamentos';
+    } catch (e) { err.textContent = e.message; ok.disabled = false; atualizar(); }
+  });
+  modal.showModal();
+}
+modal.addEventListener('close', () => modal.classList.remove('wide'));
+
 // ---------------- Cartões ----------------
 function viewCartoes(el) {
   const r = resumoAno(S.lancs, S.ano);
-  const cartoes = porItem(r).filter((it) => /cart/i.test(it.categoria)).sort((a, b) => b.total - a.total);
-  if (!cartoes.length) { el.innerHTML = '<div class="empty">Nenhum lançamento na categoria "Cartões de crédito" neste ano.</div>'; return; }
+  // Sem mês fechado com fatura (ex.: só a fatura em aberto importada), considera o ano todo.
+  let ate = r.n, cartoes = porCartao(r);
+  if (cartoes.length && !cartoes.some((c) => c.total > 0)) { ate = Math.max(...cartoes.map((c) => c.meses.findLastIndex((v) => v) + 1)); cartoes = porCartao(r, ate); }
+  cartoes.sort((a, b) => b.total - a.total);
+  const saidasAte = r.S.slice(0, ate).reduce((a, v) => a + v, 0);
+  if (!cartoes.length) { el.innerHTML = '<div class="empty">Nenhum lançamento de cartão neste ano.<br><br><button class="pill green" data-action="importar">Importar fatura do Nubank</button></div>'; return; }
+  const catCart = cartaoPorCategoria(r);
+  const catPos = catCart.filter((c) => c.valor > 0);
   const totalCart = cartoes.reduce((a, c) => a + c.total, 0);
   const pal = [css('--out'), css('--inc'), '#8A7A55', '#6B7FA8', '#A0627E'];
   el.innerHTML = `
@@ -283,21 +434,28 @@ function viewCartoes(el) {
     <div class="hero-main">
       <div class="eyebrow">Cartões de crédito · ${S.ano}</div>
       <div class="hero-num num">${brl(totalCart)}</div>
-      <p>Isso é <strong>${Math.round(totalCart / r.s * 100)}%</strong> de tudo que saiu no período, uma média de <strong>${brl(totalCart / Math.max(1, r.n))}</strong> por mês.</p>
+      <p>${saidasAte ? `Isso é <strong>${Math.round(totalCart / saidasAte * 100)}%</strong> de tudo que saiu no período, uma` : 'Uma'} média de <strong>${brl(totalCart / Math.max(1, ate))}</strong> por mês${ate > r.n ? ' (inclui faturas ainda em aberto)' : ''}.</p>
     </div>
   </section>
   <section>
-    <div class="section-head"><h2 class="h2">Fatura por mês</h2></div>
+    <div class="section-head"><h2 class="h2">Fatura por mês</h2><button class="pill" data-action="importar">Importar fatura</button></div>
     <div class="card"><div class="chart-box"><canvas id="ch-cart" role="img" aria-label="Faturas de cartão por mês"></canvas></div></div>
   </section>
   <section>
     <h2 class="h2" style="margin-bottom:12px">Por cartão</h2>
     <div class="table-box"><table>
       <thead><tr><th>Cartão</th><th class="r">Média/mês</th><th class="r">Maior fatura</th><th class="r">Total no período</th><th class="r">% dos cartões</th></tr></thead>
-      <tbody>${cartoes.map((c) => { const mx = Math.max(...c.meses.slice(0, r.n || 12)); return `<tr><td style="font-weight:500">${esc(c.nome)}</td><td class="r num">${brl(c.mediaAtivos)}</td><td class="r num">${brl(mx)} <span class="muted">(${MES_CURTO[c.meses.indexOf(mx)]})</span></td><td class="r num" style="font-weight:600">${brl(c.total)}</td><td class="r num">${Math.round(c.total / totalCart * 100)}%</td></tr>`; }).join('')}</tbody>
+      <tbody>${cartoes.map((c) => { const mx = Math.max(...c.meses.slice(0, ate || 12)); return `<tr><td style="font-weight:500">${esc(c.nome)}</td><td class="r num">${brl(c.mediaAtivos)}</td><td class="r num">${brl(mx)} <span class="muted">(${MES_CURTO[c.meses.indexOf(mx)]})</span></td><td class="r num" style="font-weight:600">${brl(c.total)}</td><td class="r num">${totalCart ? Math.round(c.total / totalCart * 100) : 0}%</td></tr>`; }).join('')}</tbody>
     </table></div>
-    <p class="muted" style="font-size:14px;line-height:1.6;margin-top:16px">Dica: lance as compras do cartão por categoria (mercado, combustível, farmácia…) em vez de só o total da fatura — assim o app mostra exatamente onde cortar.</p>
-  </section>`;
+    ${catCart.length ? '' : '<p class="muted" style="font-size:14px;line-height:1.6;margin-top:16px">Dica: use <strong>Importar fatura</strong> com o CSV do Nubank para ver as compras por categoria (mercado, combustível, farmácia…) em vez de só o total — assim o app mostra exatamente onde cortar.</p>'}
+  </section>
+  ${catPos.length ? `<section>
+    <div class="section-head"><h2 class="h2">No cartão, por categoria</h2><span class="muted" style="font-size:14px">compras importadas em ${S.ano}, incluindo faturas em aberto</span></div>
+    ${catPos.map((c, i) => `
+      <div class="bar-row"><div class="top"><span style="font-weight:500">${esc(c.nome)}</span><span class="num"><span class="muted">${Math.round(c.pct * 100)}% · </span>${brl(c.valor, 2)}</span></div>
+      <div class="track"><div style="width:${Math.max(2, c.valor / catPos[0].valor * 100)}%;background:${i === 0 ? 'var(--out)' : 'var(--inc)'}"></div></div></div>`).join('')}
+    ${catCart.some((c) => c.valor < 0) ? `<p class="muted" style="font-size:13px;margin:4px 0 0">Estornos e créditos no período: ${brl(-catCart.filter((c) => c.valor < 0).reduce((a, c) => a + c.valor, 0), 2)}.</p>` : ''}
+  </section>` : ''}`;
   S.charts.push(new Chart(document.getElementById('ch-cart'), {
     type: 'bar',
     data: { labels: MES_CURTO, datasets: cartoes.map((c, i) => ({ label: c.nome, data: c.meses, backgroundColor: pal[i % pal.length], borderRadius: 4, maxBarThickness: 44 })) },
@@ -382,6 +540,241 @@ function invForm(i) {
   modal.showModal();
 }
 
+// ---------------- Calculadoras ----------------
+const CALCS = [['meta', 'Meta', 'quanto guardar'], ['projecao', 'Projeção', 'juros compostos'], ['historico', 'Histórico', 'ativo real'], ['rendafixa', 'Renda fixa', 'CDB × LCI × Tesouro']];
+const TICKERS = [['PETR4.SA', 'Petrobras'], ['VALE3.SA', 'Vale'], ['ITUB4.SA', 'Itaú'], ['BBAS3.SA', 'Banco do Brasil'], ['WEGE3.SA', 'WEG'],
+  ['BOVA11.SA', 'ETF Ibovespa'], ['IVVB11.SA', 'ETF S&P 500 em reais'], ['HGLG11.SA', 'FII HGLG11'], ['MXRF11.SA', 'FII MXRF11'],
+  ['^BVSP', 'Índice Ibovespa'], ['BTC-BRL', 'Bitcoin em reais'], ['USDBRL=X', 'Dólar'], ['AAPL', 'Apple (em US$)']];
+let calcChart = null;
+
+const pctBr = (v, d = 2) => (v * 100).toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d }) + '%';
+const cdiAtual = () => (S.taxas ? S.taxas.cdi.valor : 10);
+const num = (v) => { const n = parseFloat(String(v).replace(',', '.')); return Number.isFinite(n) ? n : 0; };
+const fld = (label, name, value, extra = '') => `<label class="field">${label}<input name="${name}" type="number" inputmode="decimal" step="any" value="${esc(value)}" ${extra}></label>`;
+const kpi = (rot, val, cor) => `<div class="kpi"><div class="muted" style="font-size:13px">${rot}</div><div class="v num"${cor ? ` style="color:${cor}"` : ''}>${val}</div></div>`;
+
+function calcDefaults(id) {
+  const cdi = cdiAtual();
+  return {
+    meta: { meta: 100000, inicial: 0, anos: 5, taxa: cdi, corrigir: '' },
+    projecao: { inicial: 1000, aporte: 500, anos: 10, taxa: cdi },
+    historico: { ticker: 'BOVA11.SA', inicio: '2020-01', aporte: 500, inicial: 0 },
+    rendafixa: { valor: 10000, dias: 730, cdi, pctCdb: 110, pctLci: 92, selic: S.taxas ? S.taxas.selic.valor : cdi + 0.1 },
+  }[id];
+}
+
+function setCalcChart(canvas, cfg) {
+  if (calcChart && S.charts.includes(calcChart)) { calcChart.destroy(); S.charts = S.charts.filter((c) => c !== calcChart); }
+  calcChart = canvas ? new Chart(canvas, cfg) : null;
+  if (calcChart) S.charts.push(calcChart);
+}
+
+function carregarTaxas() {
+  if (S.taxas || S.taxasErr || S.taxasLoading) return;
+  S.taxasLoading = true;
+  db.cotacoes({ tipo: 'taxas' })
+    .then((t) => { S.taxas = t; })
+    .catch((e) => { S.taxasErr = e.message; })
+    .finally(() => { S.taxasLoading = false; if (route() === 'calculadoras') render(); });
+}
+
+function viewCalculadoras(el) {
+  carregarTaxas();
+  const t = S.taxas;
+  const fonte = t
+    ? `CDI <strong>${t.cdi.valor.toLocaleString('pt-BR')}% a.a.</strong> · Selic <strong>${t.selic.valor.toLocaleString('pt-BR')}%</strong> · IPCA 12m <strong>${t.ipca.valor.toLocaleString('pt-BR')}%</strong>
+       <span class="muted">${t.exemplo ? '(valores de exemplo, modo demonstração)' : `(Banco Central, ${new Date(t.cdi.data + 'T12:00').toLocaleDateString('pt-BR')})`}</span>`
+    : S.taxasErr ? `<span class="muted">Taxas do Banco Central indisponíveis: ${esc(S.taxasErr)} Usando 10% a.a. como padrão.</span>` : '<span class="muted">Buscando CDI, Selic e IPCA…</span>';
+  el.innerHTML = `
+  <section>
+    <div class="section-head"><h1 class="h2">Calculadoras</h1><div style="font-size:14px;line-height:1.6">${fonte}</div></div>
+    <div class="chips" role="group" aria-label="Calculadora" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
+      ${CALCS.map(([id, nome, sub]) => `<button class="chip" data-action="calc" data-calc="${id}" aria-pressed="${id === S.calc}"><span style="font-weight:600;font-size:14px">${nome}</span><small class="muted">${sub}</small></button>`).join('')}
+    </div>
+  </section>
+  <section class="cols" style="gap:32px">
+    <form class="card calc-form" id="calc-form" novalidate style="flex:1 1 300px;display:flex;flex-direction:column;gap:14px;align-self:flex-start"></form>
+    <div id="calc-out" style="flex:2 1 480px;min-width:0;display:flex;flex-direction:column;gap:20px"></div>
+  </section>`;
+
+  const id = S.calc;
+  const v = { ...calcDefaults(id), ...S.calcIn[id] };
+  const f = document.getElementById('calc-form');
+  const out = document.getElementById('calc-out');
+  const taxaFld = (label = 'Rentabilidade (% ao ano)') => `${fld(label, 'taxa', v.taxa, 'min="0"')}
+    ${t ? `<button type="button" class="pill" data-usar="cdi" style="align-self:flex-start;min-height:36px;font-size:13px">Usar CDI atual (${t.cdi.valor.toLocaleString('pt-BR')}%)</button>` : ''}`;
+
+  f.innerHTML = {
+    meta: `<h2 style="font-size:16px;font-weight:600">Quero juntar…</h2>
+      ${fld('Valor da meta (R$)', 'meta', v.meta, 'min="0"')}
+      ${fld('Já tenho guardado (R$)', 'inicial', v.inicial, 'min="0"')}
+      ${fld('Em quantos anos', 'anos', v.anos, 'min="0.1" step="0.5"')}
+      ${taxaFld()}
+      <label style="display:flex;gap:10px;align-items:center;font-size:14px"><input type="checkbox" name="corrigir" ${v.corrigir ? 'checked' : ''}> Meta em valor de hoje (corrigir pelo IPCA)</label>`,
+    projecao: `<h2 style="font-size:16px;font-weight:600">Se eu investir…</h2>
+      ${fld('Valor inicial (R$)', 'inicial', v.inicial, 'min="0"')}
+      ${fld('Aporte por mês (R$)', 'aporte', v.aporte, 'min="0"')}
+      ${fld('Por quantos anos', 'anos', v.anos, 'min="0.1" step="0.5"')}
+      ${taxaFld()}`,
+    historico: `<h2 style="font-size:16px;font-weight:600">E se eu tivesse investido…</h2>
+      <label class="field">Ativo (código do Yahoo)<input name="ticker" list="dl-tickers" value="${esc(v.ticker)}" autocapitalize="characters" required></label>
+      <datalist id="dl-tickers">${TICKERS.map(([c, n]) => `<option value="${c}">${n}</option>`).join('')}</datalist>
+      <p class="muted" style="font-size:12px;margin:-8px 0 0;line-height:1.5">Ações e FIIs da B3 terminam em <b>.SA</b> (ex.: PETR4.SA).</p>
+      <label class="field">Desde<input name="inicio" type="month" value="${esc(v.inicio)}" min="2000-01" required></label>
+      ${fld('Aporte por mês (R$)', 'aporte', v.aporte, 'min="0"')}
+      ${fld('Valor inicial (R$)', 'inicial', v.inicial, 'min="0"')}
+      <button class="pill green" type="submit" style="justify-content:center">Simular</button>`,
+    rendafixa: `<h2 style="font-size:16px;font-weight:600">Comparar aplicações</h2>
+      ${fld('Valor aplicado (R$)', 'valor', v.valor, 'min="0"')}
+      ${fld('Prazo (dias corridos)', 'dias', v.dias, 'min="1" step="1"')}
+      <div class="grid2">${fld('CDI (% a.a.)', 'cdi', v.cdi, 'min="0"')}${fld('Selic (% a.a.)', 'selic', v.selic, 'min="0"')}</div>
+      <div class="grid2">${fld('CDB (% do CDI)', 'pctCdb', v.pctCdb, 'min="0"')}${fld('LCI/LCA (% do CDI)', 'pctLci', v.pctLci, 'min="0"')}</div>`,
+  }[id];
+
+  // `salvar` só quando o usuário mexe: assim os padrões ainda acompanham as taxas que chegam depois
+  const ler = (salvar) => {
+    const o = Object.fromEntries(new FormData(f));
+    if (id === 'meta') o.corrigir = f.corrigir.checked ? '1' : '';
+    if (salvar) S.calcIn[id] = o;
+    return o;
+  };
+  const calcular = (salvar) => ({ meta: outMeta, projecao: outProjecao, historico: outHistorico, rendafixa: outRendaFixa }[id])(ler(salvar), out);
+
+  f.addEventListener('input', () => { if (id !== 'historico') calcular(true); else ler(true); });
+  f.addEventListener('click', (ev) => {
+    if (ev.target.closest('[data-usar="cdi"]')) { f.taxa.value = t.cdi.valor; calcular(true); }
+  });
+  f.addEventListener('submit', (ev) => { ev.preventDefault(); if (id === 'historico') simularAtivo(ler(true), out); });
+  if (id === 'historico') outHistorico(v, out); else calcular();
+}
+
+function serieChart(out, serie, rotulos) {
+  out.insertAdjacentHTML('beforeend', '<div class="card"><div class="chart-box"><canvas id="ch-calc" role="img" aria-label="Evolução do patrimônio"></canvas></div></div>');
+  const passo = rotulos ? Math.max(1, Math.ceil(serie.length / 8)) : Math.max(1, Math.ceil(serie.length / 12 / 10)) * 12;
+  const opts = chartOpts({ money: true, legend: true });
+  opts.scales.x.ticks = { ...opts.scales.x.ticks, autoSkip: false, maxRotation: 0,
+    callback: (_, i) => (i % passo ? '' : rotulos ? rotulos[i] : `${i / 12} ${i === 12 ? 'ano' : 'anos'}`) };
+  setCalcChart(document.getElementById('ch-calc'), {
+    type: 'line',
+    data: { labels: rotulos || serie.map((_, i) => `Mês ${i}`), datasets: [
+      { label: 'Patrimônio', data: serie.map((p) => p.saldo), borderColor: css('--inc'), backgroundColor: hexA(css('--inc'), 0.1), fill: true },
+      { label: 'Dinheiro depositado', data: serie.map((p) => p.investido), borderColor: css('--muted'), backgroundColor: 'transparent', borderDash: [6, 5] },
+      ...(serie[0].cdi != null ? [{ label: 'Se fosse no CDI', data: serie.map((p) => p.cdi), borderColor: css('--out'), backgroundColor: 'transparent' }] : []),
+    ].map((d) => ({ ...d, tension: 0.25, borderWidth: 2.5, pointRadius: 0, pointHoverRadius: 5 })) },
+    options: opts,
+  });
+}
+
+function outMeta(v, out) {
+  const anos = num(v.anos), meses = Math.max(1, Math.round(anos * 12));
+  const r = calc.aporteNecessario({ meta: num(v.meta), inicial: num(v.inicial), meses, taxaAA: num(v.taxa) / 100,
+    ipcaAA: (S.taxas ? S.taxas.ipca.valor : 4.5) / 100, corrigir: !!v.corrigir });
+  const ano = resumoAno(S.lancs, S.ano);
+  const sobra = ano.n ? ano.saldo / ano.n : 0;
+  out.innerHTML = `
+    <div class="feature" style="display:block;margin:0">
+      <div class="eyebrow">Guardar por mês</div>
+      <div class="hero-num num" style="font-size:clamp(40px,6vw,64px);color:var(--inc)">${r.jaAtinge ? 'R$ 0' : brl(r.aporte, 2)}</div>
+      <p class="muted" style="font-size:15px;line-height:1.6;margin:12px 0 0">${r.jaAtinge
+        ? `O que vocês já têm, rendendo ${esc(v.taxa)}% a.a., chega sozinho a ${brl(r.alvo)} em ${meses} meses.`
+        : `Por ${meses} meses, rendendo ${esc(v.taxa)}% ao ano, para chegar a <strong style="color:var(--text)">${brl(r.alvo)}</strong>${v.corrigir ? ` (os ${brl(num(v.meta))} de hoje corrigidos pela inflação)` : ''}.`}
+      ${sobra > 0 && r.aporte > 0 ? ` Isso é <strong style="color:var(--text)">${Math.round(r.aporte / sobra * 100)}%</strong> do que sobrou por mês em média em ${S.ano} (${brl(sobra)}).` : ''}</p>
+    </div>
+    <div class="kpis">${kpi('Vocês vão depositar', brl(r.investido))}${kpi('Os juros colocam', brl(r.juros), 'var(--inc)')}${kpi('Valor no final', brl(r.final))}</div>`;
+  serieChart(out, r.serie);
+}
+
+function outProjecao(v, out) {
+  const meses = Math.max(1, Math.round(num(v.anos) * 12));
+  const taxa = num(v.taxa) / 100;
+  const r = calc.projecao({ inicial: num(v.inicial), aporte: num(v.aporte), meses, taxaAA: taxa });
+  const renda = r.final * calc.taxaMensal(taxa);
+  out.innerHTML = `
+    <div class="kpis">${kpi('Valor no final', brl(r.final), 'var(--inc)')}${kpi('Total depositado', brl(r.investido))}${kpi('Juros', brl(r.juros), 'var(--inc)')}</div>
+    <p class="muted" style="font-size:14px;line-height:1.6;margin:0">Depois de ${meses} meses, os juros respondem por <strong style="color:var(--text)">${r.final ? Math.round(r.juros / r.final * 100) : 0}%</strong> do patrimônio.
+    Na mesma taxa, ele renderia cerca de <strong style="color:var(--text)">${brl(renda)}/mês</strong> sem mexer no principal (antes de IR e inflação).</p>`;
+  serieChart(out, r.serie);
+}
+
+function outHistorico(v, out) {
+  const h = S.hist;
+  if (!h || h.err) {
+    out.innerHTML = h && h.err ? `<div class="empty" style="color:var(--danger)">${esc(h.err)}</div>`
+      : '<div class="empty">Escolha um ativo e uma data e clique em <strong>Simular</strong> para ver quanto o dinheiro teria virado, comparado ao CDI.</div>';
+    setCalcChart(null);
+    return;
+  }
+  const r = h.res;
+  const moeda = h.moeda && h.moeda !== 'BRL' ? h.moeda : '';
+  const fmt = (x) => (moeda ? x.toLocaleString('pt-BR', { style: 'currency', currency: moeda, maximumFractionDigits: 0 }) : brl(x));
+  const cdiFinal = r.serie[r.serie.length - 1].cdi;
+  out.innerHTML = `
+    <div>
+      <div class="eyebrow">${esc(h.ticker)} · ${esc(h.nome)}</div>
+      <p class="muted" style="font-size:14px;margin:6px 0 0">${r.serie.length} meses, de ${h.rot[0]} a ${h.rot[h.rot.length - 1]}. Preços ajustados por dividendos e desdobramentos.${moeda ? ` Valores em ${esc(moeda)}, sem conversão.` : ''}</p>
+    </div>
+    <div class="kpis">
+      ${kpi('Valor hoje', fmt(r.final), r.ganho >= 0 ? 'var(--inc)' : 'var(--out)')}
+      ${kpi('Total aportado', fmt(r.investido))}
+      ${kpi('Ganho / perda', (r.ganho >= 0 ? '+' : '−') + fmt(Math.abs(r.ganho)) + ` <span style="font-size:15px">(${pctBr(r.rent, 1)})</span>`, r.ganho >= 0 ? 'var(--inc)' : 'var(--out)')}
+      ${cdiFinal != null && !moeda ? kpi('No CDI teria', brl(cdiFinal)) : ''}
+    </div>`;
+  serieChart(out, r.serie, h.rot);
+}
+
+async function simularAtivo(v, out) {
+  const ticker = String(v.ticker || '').trim().toUpperCase();
+  if (!ticker || !v.inicio) return;
+  out.innerHTML = '<div class="empty">Buscando cotações…</div>';
+  const inicio = v.inicio + '-01';
+  try {
+    const [h, cdi] = await Promise.all([
+      db.cotacoes({ tipo: 'historico', ticker, inicio }),
+      db.cotacoes({ tipo: 'cdi_mensal', inicio }).catch(() => null),
+    ]);
+    if (!h.pontos.length) throw new Error('Sem cotações para esse período.');
+    const aporte = num(v.aporte), inicial = num(v.inicial);
+    const res = calc.simularHistorico(h.pontos, aporte, inicial);
+    if (cdi && cdi.pontos.length) {
+      const taxaMes = new Map(cdi.pontos.map((p) => [p.data.slice(0, 7), p.taxa]));
+      const idx = calc.indiceDeTaxas(h.pontos.map((p) => ({ data: p.data, taxa: taxaMes.get(p.data.slice(0, 7)) ?? 0 })));
+      calc.simularHistorico(idx, aporte, inicial).serie.forEach((p, i) => { res.serie[i].cdi = p.saldo; });
+    }
+    const rot = h.pontos.map((p) => `${MES_CURTO[+p.data.slice(5, 7) - 1].toLowerCase()}/${p.data.slice(2, 4)}`);
+    S.hist = { ...h, res, rot };
+  } catch (e) {
+    S.hist = { err: e.message };
+  }
+  if (route() === 'calculadoras' && S.calc === 'historico') outHistorico(v, out);
+}
+
+function outRendaFixa(v, out) {
+  const valor = num(v.valor), dias = Math.max(1, Math.round(num(v.dias))), cdi = num(v.cdi) / 100, selic = num(v.selic) / 100;
+  const pctLci = num(v.pctLci) / 100;
+  const linhas = [
+    { ...calc.rendaFixa({ valor, dias, tipo: 'cdb', cdi, pct: num(v.pctCdb) / 100 }), det: `${esc(v.pctCdb)}% do CDI` },
+    { ...calc.rendaFixa({ valor, dias, tipo: 'lci', cdi, pct: pctLci }), det: `${esc(v.pctLci)}% do CDI, isento de IR` },
+    { ...calc.rendaFixa({ valor, dias, tipo: 'selic', cdi, selic }), det: 'Selic, custódia B3 de 0,20% a.a. acima de R$ 10 mil' },
+    { ...calc.rendaFixa({ valor, dias, tipo: 'poupanca', cdi, selic }), det: 'Regra atual, sem TR' },
+  ];
+  const melhor = linhas.reduce((a, b) => (b.final > a.final ? b : a));
+  const equiv = calc.cdbEquivalente(pctLci, dias);
+  out.innerHTML = `
+    <div class="table-box"><table>
+      <thead><tr><th>Aplicação</th><th class="r">Rendimento bruto</th><th class="r">IR</th><th class="r">Líquido</th><th class="r">Valor final</th><th class="r">Líquido a.a.</th></tr></thead>
+      <tbody>${linhas.map((l) => `<tr${l === melhor ? ' style="background:var(--surface)"' : ''}>
+        <td style="font-weight:500">${l.nome}${l === melhor ? ' <span class="tag" style="background:var(--inc);color:var(--on-inc)">melhor</span>' : ''}<div class="muted" style="font-size:12px">${l.det}</div></td>
+        <td class="r num">${brl(l.bruto, 2)}</td>
+        <td class="r num">${l.ir ? `${brl(l.ir, 2)}<div class="muted" style="font-size:12px">${pctBr(l.aliquota, 1)}${l.custodia ? ` + custódia ${brl(l.custodia, 2)}` : ''}</div>` : '—'}</td>
+        <td class="r num" style="font-weight:600;color:var(--inc)">${brl(l.liquido, 2)}</td>
+        <td class="r num">${brl(l.final, 2)}</td>
+        <td class="r num">${pctBr(l.rentAA)}</td></tr>`).join('')}</tbody>
+    </table></div>
+    <p class="muted" style="font-size:14px;line-height:1.6;margin:0">Em ${dias} dias o IR é de <strong style="color:var(--text)">${pctBr(calc.aliquotaIR(dias), 1)}</strong> (22,5% até 180 dias, 20% até 360, 17,5% até 720 e 15% depois).
+    Uma LCI/LCA de ${esc(v.pctLci)}% do CDI equivale a um CDB de cerca de <strong style="color:var(--text)">${Math.round(equiv * 100)}% do CDI</strong> nesse prazo. Não considera IOF (só em resgates antes de 30 dias) nem o risco de cada emissor.</p>`;
+  setCalcChart(null);
+}
+
 // ---------------- Dicas ----------------
 function viewDicas(el) {
   const r = resumoAno(S.lancs, S.ano);
@@ -439,6 +832,8 @@ app.addEventListener('click', async (ev) => {
     render();
   } else if (a === 'sair') {
     await db.signOut(); S.user = null; renderLogin();
+  } else if (a === 'calc') {
+    S.calc = b.dataset.calc; render();
   } else if (a === 'mes') {
     S.mes = +b.dataset.mes; render();
   } else if (a === 'novo-l') {
@@ -450,6 +845,8 @@ app.addEventListener('click', async (ev) => {
     if (confirm(`Excluir "${l.descricao}" de ${MESES[l.mes - 1]}?`)) { await db.deleteLancamento(l.id); S.lancs = await db.listLancamentos(); render(); }
   } else if (a === 'copiar-mes') {
     copiarMesAnterior();
+  } else if (a === 'importar') {
+    escolherFatura();
   } else if (a === 'novo-i') {
     invForm({ tipo: TIPOS_INV[0] });
   } else if (a === 'edit-i') {

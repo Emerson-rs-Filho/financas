@@ -74,6 +74,8 @@ export async function listLancamentos() {
 
 export async function saveLancamento(l) {
   const row = { ano: +l.ano, mes: +l.mes, tipo: l.tipo, descricao: l.descricao.trim(), categoria: l.categoria.trim(), valor: +l.valor };
+  // só envia as colunas da importação quando usadas, para funcionar mesmo antes de rodar o schema novo
+  if (l.cartao) Object.assign(row, { cartao: l.cartao.trim(), data_compra: l.data_compra || null });
   if (DEMO) {
     if (l.id) Object.assign(demo.lancamentos.find((x) => x.id === +l.id), row);
     else demo.lancamentos.push({ id: demo.nextId++, ...row });
@@ -84,6 +86,24 @@ export async function saveLancamento(l) {
   const q = l.id ? c.from('lancamentos').update(row).eq('id', l.id) : c.from('lancamentos').insert(row);
   const { error } = await q;
   if (error) throw error;
+}
+
+// Importa várias compras de uma vez. Linhas com import_key já existente são ignoradas.
+export async function importLancamentos(rows) {
+  const norm = rows.map((l) => ({ ano: +l.ano, mes: +l.mes, tipo: l.tipo, descricao: l.descricao.trim(), categoria: l.categoria.trim(),
+    valor: +l.valor, cartao: l.cartao || null, data_compra: l.data_compra || null, import_key: l.import_key || null }));
+  if (DEMO) {
+    const ja = new Set(demo.lancamentos.map((x) => x.import_key).filter(Boolean));
+    norm.filter((r) => !r.import_key || !ja.has(r.import_key)).forEach((r) => demo.lancamentos.push({ id: demo.nextId++, ...r }));
+    demoSave();
+    return;
+  }
+  const c = await client();
+  for (let i = 0; i < norm.length; i += 500) {
+    const { error } = await c.from('lancamentos').upsert(norm.slice(i, i + 500), { onConflict: 'import_key', ignoreDuplicates: true });
+    if (error) throw new Error(/cartao|import_key|data_compra/.test(error.message)
+      ? 'O banco ainda não tem as colunas da importação. Rode de novo o arquivo supabase/schema.sql no SQL Editor do Supabase.' : error.message);
+  }
 }
 
 export async function deleteLancamento(id) {
@@ -122,6 +142,25 @@ export async function deleteInvestimento(id) {
   const c = await client();
   const { error } = await c.from('investimentos').delete().eq('id', id);
   if (error) throw error;
+}
+
+// ---------- cotações (Edge Function "cotacoes") ----------
+const TAXAS_DEMO = { selic: { valor: 13.75, data: '' }, cdi: { valor: 13.65, data: '' }, ipca: { valor: 4.6, data: '' }, exemplo: true };
+
+export async function cotacoes(params) {
+  if (DEMO) {
+    if (params.tipo === 'taxas') return TAXAS_DEMO;
+    throw new Error('Cotações reais exigem o Supabase configurado (modo demonstração).');
+  }
+  const c = await client();
+  const { data, error } = await c.functions.invoke('cotacoes?' + new URLSearchParams(params), { method: 'GET' });
+  if (error) {
+    let msg = error.message;
+    try { msg = (await error.context.json()).error || msg; } catch (e) { /* sem corpo */ }
+    if (/Failed to send|fetch/i.test(msg)) msg = 'Não foi possível falar com a função "cotacoes". Ela já foi publicada no Supabase?';
+    throw new Error(msg);
+  }
+  return data;
 }
 
 export function resetDemo() {

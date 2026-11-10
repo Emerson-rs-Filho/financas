@@ -41,12 +41,32 @@ A chave *anon* pode ficar no código público. Quem protege os dados são as reg
 4. Em um ou dois minutos, o app estará em `https://SEU_USUARIO.github.io/nossa-casa/`.
 5. Volte ao Supabase e, em **Authentication → URL Configuration**, coloque esse endereço em *Site URL*.
 
+## Passo 3 — Cotações (aba Calculadoras)
+
+A aba **Calculadoras** busca cotações no Yahoo Finance e CDI, Selic e IPCA no Banco Central. O navegador não pode acessar essas fontes direto, então quem faz a busca é uma função no Supabase (`supabase/functions/cotacoes`). Só usuários logados conseguem usá-la. Para publicar a função, rode no terminal, dentro desta pasta:
+
+```bash
+npx supabase login
+npx supabase link --project-ref SEU_PROJECT_REF   # o código que aparece na Project URL
+npx supabase functions deploy cotacoes --no-verify-jwt
+```
+
+O `--no-verify-jwt` é necessário porque a própria função confere o login. Sem a função publicada, as calculadoras de Meta, Projeção e Renda fixa continuam funcionando com uma taxa digitada à mão. Só o simulador de **Histórico** precisa dela.
+
 ## Como usar
 
 - **Resumo:** saldo do ano, gráfico de entradas e saídas, para onde foi o dinheiro e as principais dicas.
 - **Lançamentos:** escolha o mês, adicione, edite ou exclua. O botão *Copiar fixos do mês anterior* copia as contas fixas (sem cartões e "outras") para você só ajustar os valores.
-- **Cartões:** faturas por mês e comparação entre os cartões.
+- **Cartões:** faturas por mês, comparação entre os cartões e, para faturas importadas, os gastos do cartão por categoria.
+- **Importar fatura (Nubank):** no app do Nubank, abra a fatura e exporte em CSV (arquivo `Nubank_AAAA-MM-DD.csv`). Em *Lançamentos* ou *Cartões*, clique em **Importar fatura** e escolha o arquivo. Cada compra vira um lançamento no mês da fatura (data do nome do arquivo), com categoria sugerida; revise e clique em *Importar*. O pagamento da fatura anterior é ignorado, estornos entram negativos e importar o mesmo arquivo de novo não duplica nada. As categorias que vocês corrigirem são lembradas nas próximas faturas. Se o mês já tiver uma linha "Nubank" com o total da fatura, o app oferece removê-la para não contar em dobro.
+
+> **Já usa o app?** Para ativar a importação, rode de novo o `supabase/schema.sql` inteiro no **SQL Editor** do Supabase. Ele só adiciona as colunas novas (`cartao`, `data_compra`, `import_key`) e não mexe nos dados.
 - **Investimentos:** cadastre aportes e acompanhe a meta da reserva de emergência (6× o gasto médio mensal).
+- **Calculadoras:**
+  - **Meta:** quanto guardar por mês para juntar um valor num prazo.
+  - **Projeção:** juros compostos com aportes mensais.
+  - **Histórico:** "e se eu tivesse investido em PETR4.SA, BOVA11.SA, BTC-BRL… desde 2020?", comparado com o CDI.
+  - **Renda fixa:** CDB × LCI/LCA × Tesouro Selic × poupança, já descontando o IR.
 - **Dicas:** sugestões geradas pelos próprios dados, como contas que subiram, contas que oscilam, custos anuais concentrados e meses no vermelho.
 
 Os meses do ano corrente que ainda não fecharam aparecem como previsão (tracejado) e não entram nas médias.
@@ -60,6 +80,9 @@ js/config.js          ← suas chaves do Supabase
 js/app.js             telas e navegação
 js/data.js            Supabase / modo demonstração
 js/insights.js        cálculos e dicas
+js/importar.js        leitura do CSV do Nubank e sugestão de categorias
+js/calc.js            fórmulas das calculadoras
+supabase/functions/cotacoes/  função que busca Yahoo + Banco Central
 js/seed.js            dados da planilha (2026)
 js/vendor/            Chart.js e supabase-js (sem depender de CDN)
 supabase/schema.sql   tabelas e segurança
@@ -69,5 +92,5 @@ supabase/seed_2026.sql dados iniciais
 ## Próximos passos possíveis
 
 - Importar as abas de 2023 e 2025 e os detalhes dos cartões
-- Lançar as compras do cartão por categoria
+- Importar faturas de outros bancos
 - Metas de gasto por categoria, com alerta quando passar
