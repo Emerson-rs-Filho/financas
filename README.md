@@ -74,6 +74,8 @@ A Amazon desligou em julho de 2024 o acesso de outros apps à lista de compras n
 - "Alexa, pergunte à nossa casa o que tem na lista"
 - "Alexa, diga à nossa casa que já comprei leite"
 - "Alexa, abre nossa casa" → "adiciona café"
+- "Alexa, pergunte à nossa casa quanto falta pagar" (contas do mês em Finanças)
+- "Alexa, peça à nossa casa para anotar um reparo torneira da cozinha pingando" (entra em Reparos e melhorias)
 
 > "Alexa, adiciona leite na lista" (sem "nossa casa") continua indo para a lista **nativa** da Alexa, não para o app.
 
@@ -94,6 +96,8 @@ A Amazon desligou em julho de 2024 o acesso de outros apps à lista de compras n
 6. Na aba **Test**, troque *Off* por **Development** e escreva "abre nossa casa" para testar. Pronto: funciona em todos os Echo e no app Alexa da mesma conta.
 
 A função confere que cada pedido veio mesmo da Alexa (assinatura da Amazon) e da sua skill (Skill ID), e grava na lista com a chave de serviço, que fica só no servidor do Supabase.
+
+**Já tinha a skill?** Para ganhar as frases de contas e reparos: cole de novo o `alexa/modelo-pt-BR.json` no **JSON Editor** (Save e Build skill) e publique a função outra vez com `npx supabase functions deploy alexa --no-verify-jwt`.
 
 **Dica:** no app Alexa, crie uma **Rotina** com uma frase curta (ex.: "acabou o café") que dispara "peça à nossa casa para adicionar café".
 

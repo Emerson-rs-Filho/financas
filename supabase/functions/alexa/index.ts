@@ -1,7 +1,9 @@
-// Edge Function "alexa": atende a skill particular "Nossa Casa" e mexe na lista de compras.
+// Edge Function "alexa": atende a skill particular "Nossa Casa": lista de compras, contas a pagar e reparos.
 //   "Alexa, peça à nossa casa para adicionar leite e pão"
 //   "Alexa, pergunte à nossa casa o que tem na lista"
 //   "Alexa, diga à nossa casa que já comprei leite"
+//   "Alexa, pergunte à nossa casa quanto falta pagar"
+//   "Alexa, peça à nossa casa para anotar um reparo torneira pingando"
 // Deploy (veja o README):
 //   npx supabase secrets set ALEXA_SKILL_ID=amzn1.ask.skill.xxxx
 //   npx supabase functions deploy alexa --no-verify-jwt
@@ -94,7 +96,7 @@ const ENCERRAR = /^(nao|nada|so isso|e so isso|e so|pronto|acabou|obrigad[oa]|na
 const juntar = (xs: string[]) => (xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} e ${xs[xs.length - 1]}`);
 const falado = (i: { nome: string; quantidade?: string | null }) =>
   (!i.quantidade ? i.nome : /[a-zà-ú]/i.test(i.quantidade) ? `${i.quantidade} de ${i.nome}` : `${i.quantidade} ${i.nome}`).toLowerCase();
-const AJUDA = 'Você pode dizer: adiciona leite e pão; o que tem na lista; ou já comprei leite.';
+const AJUDA = 'Você pode dizer: adiciona leite e pão; o que tem na lista; já comprei leite; quanto falta pagar; ou anotar um reparo.';
 
 async function todos(): Promise<Item[]> {
   const { data, error } = await db.from('compras_itens').select('id,nome,quantidade,comprado').order('criado_em');
@@ -105,6 +107,14 @@ async function todos(): Promise<Item[]> {
 // ---------- intenções ----------
 async function adicionar(texto: string, conversa = false) {
   if (conversa && ENCERRAR.test(normalizar(texto).replace(/[.!,]/g, ''))) return fala('Até mais!');
+  if (conversa) {
+    // com a skill aberta, tudo o que se fala chega aqui como "item": reconhece os outros pedidos
+    const dito = normalizar(texto).replace(/[.!?,]/g, '');
+    if (/^(quanto falta pagar|quanto ainda falta pagar|quais contas|que contas|tem conta|o que vence)/.test(dito)) return contas();
+    if (/^(o que tem na lista|o que tem para comprar|o que falta comprar|ler a lista|le a lista|leia a lista)/.test(dito)) return lerLista();
+    const rep = /^anot[ae]r? (?:um |o )?(?:reparo|conserto)(.*)$/i.exec(texto.trim());
+    if (rep) return anotarReparo(rep[1]);
+  }
   const novos = separarItens(texto);
   if (!novos.length) return conversa ? continuar('Não entendi o item. O que eu adiciono?') : fala('Não entendi o item. O que eu adiciono?', false, 'Diga, por exemplo: adiciona leite.');
   const lista = await todos();
@@ -158,6 +168,59 @@ async function comprei(texto: string) {
   return fala(partes.join(' '));
 }
 
+// ---------- contas a pagar (Finanças) ----------
+const reais = (v: number) => { const n = Math.round(v); return `${n} ${n === 1 ? 'real' : 'reais'}`; };
+const emDias = (n: number) => (n === 0 ? 'hoje' : n === 1 ? 'amanhã' : `em ${n} dias`);
+
+async function contas() {
+  // "hoje" no horário de Brasília (a função roda em UTC)
+  const agora = new Date(Date.now() - 3 * 3600 * 1000);
+  const ano = agora.getUTCFullYear(), mes = agora.getUTCMonth() + 1, dia = agora.getUTCDate();
+  const ultimo = new Date(Date.UTC(ano, mes, 0)).getUTCDate();
+  const prefixo = `${ano}-${String(mes).padStart(2, '0')}-`;
+  const [k, p] = await Promise.all([
+    db.from('contas').select('id,descricao,valor_previsto,dia_vencimento,recorrente,vencimento,ativa'),
+    db.from('contas_pagamentos').select('conta_id').eq('ano', ano).eq('mes', mes),
+  ]);
+  if (k.error) throw k.error;
+  if (p.error) throw p.error;
+  // deno-lint-ignore no-explicit-any
+  const cadastradas = (k.data as any[]).filter((c) => c.ativa !== false);
+  if (!cadastradas.length) return fala('Ainda não há contas cadastradas no aplicativo.');
+  // deno-lint-ignore no-explicit-any
+  const pagas = new Set((p.data as any[]).map((x) => x.conta_id));
+  const abertas: { nome: string; valor: number; dias: number }[] = [];
+  for (const c of cadastradas) {
+    if (pagas.has(c.id)) continue;
+    let venc: number | null = null;
+    if (c.recorrente !== false) venc = Math.min(c.dia_vencimento ?? 1, ultimo);
+    else if (c.vencimento && String(c.vencimento).startsWith(prefixo)) venc = Number(String(c.vencimento).slice(8, 10));
+    if (venc != null) abertas.push({ nome: String(c.descricao).toLowerCase(), valor: Number(c.valor_previsto) || 0, dias: venc - dia });
+  }
+  if (!abertas.length) return fala('Todas as contas deste mês já foram pagas.');
+  abertas.sort((a, b) => a.dias - b.dias);
+  const total = abertas.reduce((s, c) => s + c.valor, 0);
+  const vencidas = abertas.filter((c) => c.dias < 0);
+  const proximas = abertas.filter((c) => c.dias >= 0 && c.dias <= 7);
+  const partes = [`Falta pagar ${abertas.length === 1 ? 'uma conta' : `${abertas.length} contas`} neste mês, no total de ${reais(total)}.`];
+  if (vencidas.length) partes.push(`${vencidas.length === 1 ? 'Está vencida' : 'Estão vencidas'}: ${juntar(vencidas.map((c) => c.nome))}.`);
+  if (proximas.length) partes.push(`${proximas.length === 1 ? 'Vence' : 'Vencem'} nos próximos sete dias: ${juntar(proximas.map((c) => `${c.nome} ${emDias(c.dias)}`))}.`);
+  return fala(partes.join(' '));
+}
+
+// ---------- reparos ----------
+async function anotarReparo(texto: string) {
+  const t = String(texto || '').replace(/\s+/g, ' ').trim().replace(/^(de|do|da|para|pra|que)\s+/i, '').replace(/[.!?]+$/, '');
+  if (!t) return fala('Qual é o reparo?', false, 'Diga, por exemplo: anotar um reparo, torneira da cozinha pingando.');
+  const { data, error } = await db.from('reparos').select('id,titulo,status');
+  if (error) throw error;
+  // deno-lint-ignore no-explicit-any
+  if ((data as any[]).some((r) => r.status !== 'feito' && normalizar(r.titulo) === normalizar(t))) return fala(`${capital(t)} já está anotado nos reparos.`);
+  const ins = await db.from('reparos').insert([{ titulo: capital(t) }]);
+  if (ins.error) throw ins.error;
+  return fala(`Anotei nos reparos: ${t}.`);
+}
+
 const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 // ---------- entrada ----------
@@ -183,12 +246,14 @@ Deno.serve(async (req) => {
       case 'AdicionarIntent': return await adicionar(item, !!body.session?.attributes?.conversa);
       case 'LerListaIntent': return await lerLista();
       case 'CompreiIntent': return await comprei(item);
+      case 'ContasIntent': return await contas();
+      case 'AnotarReparoIntent': return await anotarReparo(item);
       case 'AMAZON.HelpIntent': return fala(AJUDA, false, 'O que eu coloco na lista?');
       case 'AMAZON.StopIntent': case 'AMAZON.CancelIntent': case 'AMAZON.NavigateHomeIntent': return fala('Até mais!');
       default: return fala('Não entendi. Diga, por exemplo: adiciona leite.', false, AJUDA);
     }
   } catch (e) {
     console.error('alexa:', e);
-    return fala('Tive um problema para falar com a lista de compras. Tenta de novo daqui a pouco.');
+    return fala('Tive um problema para falar com o aplicativo. Tenta de novo daqui a pouco.');
   }
 });
