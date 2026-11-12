@@ -944,3 +944,115 @@ export function assinarCalendario(cb) {
   });
   return () => { if (canal) canal.unsubscribe(); };
 }
+
+// ---------- Open Finance (MeuPluggy, via Edge Function "openfinance") ----------
+// As transações chegam em of_pendentes e só viram lançamento quando alguém confirma no app.
+function demoOf() {
+  if (!demo.of) demo.of = { itens: [], contas: [], pendentes: [] };
+  return demo.of;
+}
+// Exemplo para o modo demonstração: um cartão e uma conta, com compras deste mês.
+function demoOfExemplo(item_id) {
+  const h = new Date(), ano = h.getFullYear(), mes = h.getMonth() + 1;
+  const dia = (d) => `${ano}-${String(mes).padStart(2, '0')}-${String(Math.min(d, h.getDate())).padStart(2, '0')}`;
+  const fat = mes === 12 ? { ano: ano + 1, mes: 1 } : { ano, mes: mes + 1 };
+  const p = (n, conta_id, tipo, descricao, valor, d, categoria, extra = {}) => ({ id: n, import_key: `pluggy|demo-${item_id}-${n}`, conta_id, tipo, descricao, valor,
+    data_compra: dia(d), ...(conta_id.endsWith('nu') ? fat : { ano, mes }), categoria, marcada: true, aviso: null, situacao: 'pendente', ...extra });
+  return {
+    contas: [{ conta_id: `${item_id}-nu`, item_id, nome: 'Nubank Ultravioleta', tipo: 'CREDIT', apelido: 'Nubank', ativa: true },
+      { conta_id: `${item_id}-cc`, item_id, nome: 'Conta corrente', tipo: 'BANK', apelido: null, ativa: true }],
+    pendentes: [
+      p(1, `${item_id}-nu`, 'saida', 'Supermercado Bom Preço', 312.4, 3, 'Mercado'),
+      p(2, `${item_id}-nu`, 'saida', 'IFD*Pizzaria Napoli', 89.9, 5, 'Alimentação fora'),
+      p(3, `${item_id}-nu`, 'saida', 'Posto Ipiranga', 200, 6, 'Combustível'),
+      p(4, `${item_id}-nu`, 'saida', 'Estorno Loja Online', -59.9, 7, 'Estornos do cartão'),
+      p(5, `${item_id}-cc`, 'entrada', 'Salário', 5200, 5, 'Outras entradas'),
+      p(6, `${item_id}-cc`, 'saida', 'Pix enviado - Escola', 950, 8, 'Outros'),
+      p(7, `${item_id}-cc`, 'saida', 'Aplicação RDB', 500, 9, 'Outros', { marcada: false, aviso: 'investimento' }),
+    ],
+  };
+}
+
+export async function ofCarregar() {
+  if (DEMO) {
+    const o = demoOf();
+    return { itens: o.itens.slice(), contas: o.contas.slice(), pendentes: o.pendentes.filter((p) => p.situacao === 'pendente') };
+  }
+  const c = await client();
+  const [itens, contas, pend] = await Promise.all([
+    c.from('of_itens').select('*').order('conectado_em'),
+    c.from('of_contas').select('*').order('nome'),
+    c.from('of_pendentes').select('*').eq('situacao', 'pendente').order('data_compra'),
+  ]);
+  const error = itens.error || contas.error || pend.error;
+  if (error) throw new Error(/of_/.test(error.message || '') ? 'As tabelas do Open Finance ainda não existem. Rode de novo o arquivo supabase/schema.sql no SQL Editor do Supabase.' : error.message);
+  return { itens: itens.data, contas: contas.data, pendentes: numeros(pend.data) };
+}
+
+// Só o número, para o aviso da tela inicial.
+export async function ofContarPendentes() {
+  if (DEMO) return demoOf().pendentes.filter((p) => p.situacao === 'pendente').length;
+  const c = await client();
+  const { count, error } = await c.from('of_pendentes').select('id', { count: 'exact', head: true }).eq('situacao', 'pendente');
+  if (error) throw error;
+  return count || 0;
+}
+
+export async function ofSync() {
+  if (DEMO) {
+    demoOf().itens.forEach((i) => { i.ultimo_sync = new Date().toISOString(); });
+    demoSave();
+    return { ok: true, novas: 0, erros: [] };
+  }
+  return invocar('openfinance', { acao: 'sync' });
+}
+
+export async function ofAdicionar(item_id) {
+  if (DEMO) {
+    const o = demoOf();
+    if (o.itens.some((i) => i.item_id === item_id)) return { ok: true, novas: 0 };
+    const ex = demoOfExemplo(item_id);
+    o.itens.push({ item_id, nome: 'MeuPluggy', status: 'UPDATED', conectado_em: new Date().toISOString(), ultimo_sync: new Date().toISOString(), erro: null });
+    o.contas.push(...ex.contas);
+    ex.pendentes.forEach((p) => o.pendentes.push({ ...p, id: demo.nextId++ }));
+    demoSave();
+    return { ok: true, novas: ex.pendentes.length };
+  }
+  return invocar('openfinance', { acao: 'adicionar', item_id });
+}
+
+export async function ofRemover(item_id) {
+  if (DEMO) {
+    const o = demoOf();
+    const contas = new Set(o.contas.filter((k) => k.item_id === item_id).map((k) => k.conta_id));
+    o.itens = o.itens.filter((i) => i.item_id !== item_id);
+    o.contas = o.contas.filter((k) => k.item_id !== item_id);
+    o.pendentes = o.pendentes.filter((p) => !contas.has(p.conta_id));
+    demoSave();
+    return;
+  }
+  await invocar('openfinance', { acao: 'remover', item_id });
+}
+
+// campos: { apelido, ativa }
+export async function ofSalvarConta(conta_id, campos) {
+  const row = { apelido: (campos.apelido || '').trim() || null, ativa: !!campos.ativa };
+  if (DEMO) { Object.assign(demoOf().contas.find((k) => k.conta_id === conta_id), row); demoSave(); return; }
+  const c = await client();
+  const { error } = await c.from('of_contas').update(row).eq('conta_id', conta_id);
+  if (error) throw error;
+}
+
+// situacao: 'importada' ou 'descartada' (as pendentes nunca são apagadas, para não voltarem no próximo sync)
+export async function ofMarcar(ids, situacao) {
+  if (!ids.length) return;
+  if (DEMO) {
+    const s = new Set(ids);
+    demoOf().pendentes.forEach((p) => { if (s.has(p.id)) p.situacao = situacao; });
+    demoSave();
+    return;
+  }
+  const c = await client();
+  const { error } = await c.from('of_pendentes').update({ situacao }).in('id', ids);
+  if (error) throw error;
+}

@@ -233,6 +233,9 @@ dialog.wide { width: min(760px, calc(100vw - 32px)); }
 .imp-row .li-main { gap: 6px; }
 .imp-row .meta { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .imp-row input[type="text"] { width: 170px; max-width: 100%; min-height: 34px; padding: 0 12px; border-radius: 99px; border: 1px solid transparent; background: var(--surface-2); color: var(--text); font-size: 16px; }
+.imp-grupo { display: flex; align-items: center; gap: 8px; padding: 16px 0 4px; font-size: 12px; font-weight: 600; color: var(--muted); border-bottom: 1px solid var(--border); }
+.imp-grupo:first-child { padding-top: 4px; }
+.imp-row .meta { flex-wrap: wrap; }
 .imp-all { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); min-height: 36px; }
 .imp-total { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; font-size: 13px; }
 .imp-total strong { font-size: 20px; letter-spacing: -0.02em; color: var(--text); }
