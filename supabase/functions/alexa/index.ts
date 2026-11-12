@@ -131,6 +131,7 @@ type Saida = string | { texto: string; repetir?: boolean; sessao?: Record<string
 const responder = (intent: string, r: Saida) =>
   (typeof r === 'string' ? fala(r) : r.repetir ? perguntar(intent, r.texto, r.sessao) : fala(r.texto));
 
+const CANCELAR = /^(?:pare|para|parar|cancela|cancelar|cancele|esquece|esqueca|deixa|deixa pra la|deixa para la|nao|nao quero|nada|tchau|sair|sai|chega|desisto|ignora|volta|voltar)$/;
 const ENCERRAR = /^(nao|nada|so isso|e so isso|e so|pronto|acabou|obrigad[oa]|nao obrigad[oa]|tchau|chega|nada mais|mais nada)$/;
 // Frases que o modelo de voz pode jogar na AdicionarIntent ("adicionar {item}"): estes começos levam ao pedido certo.
 const PEDIDOS: [RegExp, string][] = [
@@ -289,6 +290,14 @@ Deno.serve(async (req) => {
     }
     if (r.type === 'SessionEndedRequest') return json({ version: '1.0', response: {} });
     if (r.type !== 'IntentRequest') return json(fala(AJUDA));
+    // Respondendo a uma pergunta ("Em que foi?"), "pare"/"cancela"/"não" chegam como o próprio slot: cancela, sem gravar.
+    const dito = normalizar(r.intent?.slots?.item?.value ?? '').replace(/[.!?,]/g, '');
+    // pergunta pendente: a nossa (algo guardado na sessão além de hub/nome) ou a da própria Alexa (slot de outra intenção que não a lista)
+    const pendente = Object.keys(sessao).some((k) => k !== 'hub' && k !== 'nome') || (r.intent?.name ?? '') !== 'AdicionarIntent';
+    if (/^(?:tchau|sair|sai|chega)$/.test(dito)) return json(tchau());
+    if (pendente && CANCELAR.test(dito)) {
+      return json(sessao.hub ? abrirHub(sessao.nome ?? null, 'Tudo bem, não anotei nada. O que deseja fazer?') : fala('Tudo bem, não anotei nada.'));
+    }
     return json(noHub(await executar(r.intent?.name ?? '', r.intent?.slots?.item?.value ?? '', sessao, personId), sessao));
   } catch (e) {
     console.error('alexa:', e);
