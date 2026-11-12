@@ -21,6 +21,7 @@ export const IC = {
   resumo: 'M3 11l9-7 9 7M5 10v10h14V10',
   lancamentos: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
   cartoes: 'M2 7h20v12H2zM2 11h20',
+  banco: 'M3 10l9-6 9 6M5 10v8M10 10v8M14 10v8M19 10v8M3 21h18',
   investimentos: 'M3 17l6-6 4 4 8-8M15 7h6v6',
   calculadoras: 'M5 3h14v18H5zM8 7h8M8 12h.01M12 12h.01M16 12h.01M8 16h.01M12 16h.01M16 16h.01',
   dicas: 'M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5V16h8v-2.5A6 6 0 0 0 12 3z',

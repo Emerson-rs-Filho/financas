@@ -7,7 +7,8 @@ import { modal, esc, css, ico, sinal, PAL } from '../ui.js';
 
 const S = { lancs: [], invs: [], ano: new Date().getFullYear(), mes: null, charts: [],
   calc: 'meta', calcIn: {}, taxas: null, taxasErr: '', hist: null,
-  contas: [], pags: [], orc: [], erroExtra: '', cotErro: '' };
+  contas: [], pags: [], orc: [], erroExtra: '', cotErro: '',
+  of: { itens: [], contas: [], pendentes: [] }, ofErro: '', ofSync: false, ofMsg: '' };
 const TIPOS_INV = ['Reserva de emergência', 'Tesouro Direto', 'CDB / LCI / LCA', 'Fundos', 'Ações / FIIs', 'Previdência', 'Outros'];
 
 // contexto do núcleo (render da estrutura, aba atual, navegação)
@@ -1133,14 +1134,16 @@ async function carregarContasOrc() {
 // Avisos para o topo do Resumo: contas vencidas/vencendo e categorias perto do teto (mês atual).
 function alertasHtml() {
   const h = new Date();
-  if (S.ano !== h.getFullYear()) return '';
+  const nPend = S.of.pendentes.length;
+  const pend = nPend ? `<a class="alerta" href="#financas/bancos">${ico('banco', 16)}${nPend} ${nPend > 1 ? 'transações do banco' : 'transação do banco'} para revisar</a>` : '';
+  if (S.ano !== h.getFullYear()) return pend ? `<div class="alertas">${pend}</div>` : '';
   const ano = h.getFullYear(), mes = h.getMonth() + 1;
   const cs = contasDoMes(ano, mes);
   const venc = cs.filter((c) => c.sit === 'vencida');
   const logo = cs.filter((c) => !c.pag && c.dias >= 0 && c.dias <= 3);
   const gasto = gastoPorCategoria(ano, mes);
   const orc = S.orc.map((o) => ({ ...o, gasto: gasto.get(o.categoria) || 0 })).filter((o) => o.gasto >= o.teto * 0.8).sort((a, b) => b.gasto / b.teto - a.gasto / a.teto);
-  const itens = [];
+  const itens = pend ? [pend] : [];
   if (venc.length) itens.push(`<a class="alerta neg" href="#financas/contas">${ico('alerta', 16)}${venc.length} ${venc.length > 1 ? 'contas vencidas' : 'conta vencida'}: ${esc(venc.map((c) => c.k.descricao).join(', '))}</a>`);
   logo.forEach((c) => itens.push(`<a class="alerta" href="#financas/contas">${ico('contas', 16)}${esc(c.k.descricao)} vence ${c.dias === 0 ? 'hoje' : c.dias === 1 ? 'amanhã' : `em ${c.dias} dias`} · ${brl(c.k.valor_previsto)}</a>`));
   orc.slice(0, 3).forEach((o) => itens.push(`<a class="alerta ${o.gasto > o.teto ? 'neg' : ''}" href="#financas/orcamento">${ico('orcamento', 16)}${esc(o.categoria)}: ${Math.round(o.gasto / o.teto * 100)}% do teto</a>`));
@@ -1412,22 +1415,263 @@ function tetoForm(cat) {
   f.teto.select();
 }
 
+// ---------------- Bancos (Open Finance pelo MeuPluggy) ----------------
+// As transações chegam da função "openfinance" em of_pendentes; aqui a casa confere e importa.
+const nomeConta = (k) => (k && (k.apelido || k.nome)) || 'Conta';
+const contaDe = (id) => S.of.contas.find((k) => k.conta_id === id);
+const ehCartaoOf = (p) => (contaDe(p.conta_id) || {}).tipo === 'CREDIT';
+const quando = (iso) => new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+const pl = (n, um, varios) => `${n} ${n === 1 ? um : varios}`;
+
+async function carregarOf() {
+  try { S.of = await db.ofCarregar(); S.ofErro = ''; } catch (e) { S.of = { itens: [], contas: [], pendentes: [] }; S.ofErro = e.message; }
+}
+
+// Redesenha só se a pessoa continua em Finanças e sem formulário aberto.
+const redesenharSeAqui = () => { if (C.mod && C.mod.id === 'financas' && !modal.open) render(); };
+
+async function sincronizarOf() {
+  if (S.ofSync) return;
+  S.ofSync = true; S.ofMsg = '';
+  redesenharSeAqui();
+  try {
+    const r = await db.ofSync();
+    S.ofMsg = r.erros && r.erros.length ? r.erros.join(' · ') : r.novas ? `${pl(r.novas, 'transação nova', 'transações novas')} para revisar.` : 'Nada novo no banco.';
+  } catch (e) { S.ofMsg = e.message; }
+  S.ofSync = false;
+  await carregarOf();
+  redesenharSeAqui();
+}
+
+// Sem o pg_cron, sincroniza ao abrir Finanças se a última vez foi há mais de 12 horas.
+function sincronizarSeAntigo() {
+  const velho = (i) => !i.ultimo_sync || Date.now() - Date.parse(i.ultimo_sync) > 12 * 3600e3;
+  if (!S.ofErro && S.of.itens.some(velho)) sincronizarOf();
+}
+
+// Já lançada pela importação do CSV, à mão ou por uma conta paga? Vem desmarcada.
+function pareceLancada(p) {
+  const cartao = ehCartaoOf(p);
+  return S.lancs.some((l) => l.import_key === p.import_key || (Math.abs(l.valor - p.valor) < 0.005 && (cartao
+    ? !!l.cartao && l.data_compra === p.data_compra
+    : !l.cartao && l.ano === p.ano && l.mes === p.mes && l.tipo === p.tipo)));
+}
+
+function viewBancos(el) {
+  const o = S.of;
+  const head = `<div class="page-head"><h1>bancos</h1>
+    <div class="actions">${o.itens.length ? `<button class="btn" data-action="of-sync" ${S.ofSync ? 'disabled' : ''} title="Buscar transações novas">${ico('refresh', 16)}<span class="lbl">${S.ofSync ? 'sincronizando…' : 'sincronizar'}</span></button>` : ''}
+      <button class="btn lime" data-action="of-conectar">${ico('plus', 16)}conectar banco</button></div></div>`;
+  if (S.ofErro) { el.innerHTML = `${head}<div class="empty">${esc(S.ofErro)}</div>`; return; }
+  const msg = S.ofMsg ? `<div class="alertas"><span class="alerta">${ico('banco', 16)}${esc(S.ofMsg)}</span></div>` : '';
+  if (!o.itens.length) {
+    el.innerHTML = `${head}${msg}<div class="empty">Conecte seus bancos pelo Open Finance e as compras do cartão e da conta chegam sozinhas, uma vez por dia. Você só confere e confirma: nada vira lançamento sem passar por aqui.<br><br>
+      1. Em <a href="https://meu.pluggy.ai" target="_blank" rel="noopener">meu.pluggy.ai</a>, autorize suas contas (é o fluxo oficial do Open Finance, aprovado no app do banco).<br>
+      2. No painel da Pluggy, conecte o MeuPluggy à sua aplicação e copie o código da conexão (item id).<br>
+      3. Toque em <b>conectar banco</b> e cole o código.<br><br>O passo a passo completo está no README.</div>`;
+    return;
+  }
+  const grupos = new Map();
+  o.pendentes.forEach((p) => { if (!grupos.has(p.conta_id)) grupos.set(p.conta_id, []); grupos.get(p.conta_id).push(p); });
+  const pendHtml = o.pendentes.length ? `<div class="tile"><div class="tile-head"><h2>para revisar</h2><span class="num">${o.pendentes.length}</span></div>
+      <div class="list">${[...grupos].map(([id, ps]) => {
+        const sai = ps.filter((p) => p.tipo === 'saida').reduce((a, p) => a + p.valor, 0), ent = ps.filter((p) => p.tipo === 'entrada').reduce((a, p) => a + p.valor, 0);
+        return `<div class="li tap" data-action="of-revisar"><span class="li-ic">${ico(ehCartaoOf(ps[0]) ? 'cartoes' : 'banco', 17)}</span>
+          <div class="li-main"><span class="li-t">${esc(nomeConta(contaDe(id)))}</span><span class="li-s">${pl(ps.length, 'transação', 'transações')}</span></div>
+          <div class="li-v num">${sai ? `<span>${brl(sai, 2)}</span>` : ''}${ent ? `<small class="pos">+${brl(ent, 2)}</small>` : ''}</div></div>`;
+      }).join('')}</div>
+      <button class="btn lime" data-action="of-revisar" style="margin-top:12px;min-height:48px;width:100%;justify-content:center">revisar e importar</button></div>`
+    : '<div class="tile"><div class="tile-head"><h2>para revisar</h2></div><p class="muted" style="margin:0;font-size:13px">Nada novo. O que chegar do banco aparece aqui.</p></div>';
+  const itensHtml = o.itens.map((it) => {
+    const contas = o.contas.filter((k) => k.item_id === it.item_id);
+    return `<div class="tile"><div class="tile-head"><h2>${esc(it.nome)}</h2>
+        <button class="btn icon" data-action="of-remover" data-item="${esc(it.item_id)}" aria-label="Desconectar ${esc(it.nome)}" title="Desconectar">${ico('trash', 16)}</button></div>
+      <p class="muted" style="margin:0 0 8px;font-size:12px">${it.ultimo_sync ? `atualizado em ${quando(it.ultimo_sync)}` : 'ainda não sincronizado'}</p>
+      ${it.erro ? `<div class="alertas" style="margin-bottom:8px"><span class="alerta neg">${ico('alerta', 16)}${esc(it.erro)}</span></div>` : ''}
+      ${contas.length ? `<div class="list">${contas.map((k) => `
+        <div class="li tap" data-action="of-conta" data-conta="${esc(k.conta_id)}"><span class="li-ic">${ico(k.tipo === 'CREDIT' ? 'cartoes' : 'banco', 17)}</span>
+          <div class="li-main"><span class="li-t">${esc(nomeConta(k))}</span><span class="li-s">${k.tipo === 'CREDIT' ? 'cartão' : 'conta'}${k.apelido ? ` · ${esc(k.nome)}` : ''}${k.ativa ? '' : ' · não sincroniza'}</span></div>
+          <div class="li-act"><button data-action="of-conta" data-conta="${esc(k.conta_id)}" aria-label="Editar ${esc(nomeConta(k))}">${ico('edit', 17)}</button></div></div>`).join('')}</div>`
+        : '<p class="muted" style="margin:0;font-size:13px">Nenhuma conta ainda. Sincronize para buscar.</p>'}</div>`;
+  }).join('');
+  el.innerHTML = `${head}${msg}
+  <section class="cols" style="align-items:flex-start">
+    <div style="display:flex;flex-direction:column;gap:12px">${pendHtml}</div>
+    <div style="display:flex;flex-direction:column;gap:12px">${itensHtml}</div>
+  </section>`;
+}
+
+function ofConectarForm() {
+  modal.innerHTML = `
+  <form method="dialog">
+    <h2 class="h2" style="font-size:24px">Conectar banco</h2>
+    <p class="muted" style="margin:0;font-size:13px">No painel da Pluggy (dashboard.pluggy.ai), abra a sua aplicação, conecte o <b>MeuPluggy</b> e copie o código da conexão (item id). As contas e cartões autorizados no MeuPluggy vêm juntos.</p>
+    <label class="field">Código da conexão<input name="item" required placeholder="1a2b3c4d-…" autocomplete="off" spellcheck="false" autocapitalize="off"></label>
+    <div class="error" id="f-err" role="alert"></div>
+    <div class="dialog-actions"><button class="pill" value="cancel" formnovalidate>Cancelar</button><button class="pill green" value="ok" id="of-ok">Conectar</button></div>
+  </form>`;
+  const f = modal.querySelector('form');
+  f.addEventListener('submit', async (ev) => {
+    if (ev.submitter && ev.submitter.value === 'cancel') return;
+    ev.preventDefault();
+    if (!f.reportValidity()) return;
+    const ok = f.querySelector('#of-ok');
+    ok.disabled = true; ok.textContent = 'conectando…';
+    try {
+      const r = await db.ofAdicionar(f.item.value.trim());
+      modal.close();
+      S.ofMsg = r.novas ? `Conectado. ${pl(r.novas, 'transação', 'transações')} para revisar.` : 'Conectado. Nada novo por enquanto.';
+      await carregarOf();
+      C.irPara('financas/bancos');
+    } catch (e) { f.querySelector('#f-err').textContent = e.message; ok.disabled = false; ok.textContent = 'Conectar'; }
+  });
+  modal.showModal();
+}
+
+function ofContaForm(k) {
+  const cartao = k.tipo === 'CREDIT';
+  modal.innerHTML = `
+  <form method="dialog">
+    <h2 class="h2" style="font-size:24px">${cartao ? 'Cartão' : 'Conta'}</h2>
+    <p class="muted" style="margin:0;font-size:13px">No banco: ${esc(k.nome)}.</p>
+    <label class="field">${cartao ? 'Nome do cartão nos lançamentos' : 'Apelido'}<input name="apelido" value="${esc(k.apelido || '')}" placeholder="${esc(k.nome)}"></label>
+    ${cartao ? '<p class="muted" style="margin:0;font-size:12px">Use o mesmo nome da importação da fatura (ex.: Nubank) para as compras ficarem juntas na aba Cartões.</p>' : ''}
+    <label class="check"><input type="checkbox" name="ativa" ${k.ativa ? 'checked' : ''}><span>Trazer as transações desta ${cartao ? 'fatura' : 'conta'}</span></label>
+    <div class="error" id="f-err" role="alert"></div>
+    <div class="dialog-actions"><button class="pill" value="cancel" formnovalidate>Cancelar</button><button class="pill green" value="ok">Salvar</button></div>
+  </form>`;
+  const f = modal.querySelector('form');
+  f.addEventListener('submit', async (ev) => {
+    if (ev.submitter && ev.submitter.value === 'cancel') return;
+    ev.preventDefault();
+    try {
+      await db.ofSalvarConta(k.conta_id, { apelido: f.apelido.value, ativa: f.ativa.checked });
+      modal.close();
+      await carregarOf();
+      render();
+    } catch (e) { f.querySelector('#f-err').textContent = e.message; }
+  });
+  modal.showModal();
+}
+
+// Revisão: mesmo visual da importação da fatura, com uma seção por conta/cartão.
+function ofRevisarForm() {
+  const ps = S.of.pendentes.slice().sort((a, b) => nomeConta(contaDe(a.conta_id)).localeCompare(nomeConta(contaDe(b.conta_id))) || a.conta_id.localeCompare(b.conta_id) || a.data_compra.localeCompare(b.data_compra));
+  if (!ps.length) return;
+  const dup = ps.map(pareceLancada);
+  const cats = [...new Set([...S.lancs.map((x) => x.categoria), ...ps.map((p) => p.categoria)])].sort();
+  const dataCurta = (d) => `${d.slice(8, 10)}/${d.slice(5, 7)}`;
+  let atual = null;
+  const linhas = ps.map((p, i) => {
+    const k = contaDe(p.conta_id), cartao = ehCartaoOf(p);
+    const titulo = p.conta_id !== atual ? `<div class="imp-grupo">${ico(cartao ? 'cartoes' : 'banco', 14)}${esc(nomeConta(k))}</div>` : '';
+    atual = p.conta_id;
+    const marca = p.marcada && !dup[i];
+    const tags = [cartao ? `fatura de ${MES_CURTO[p.mes - 1].toLowerCase()}${p.ano !== new Date().getFullYear() ? ` ${p.ano}` : ''}` : '', p.aviso || '', dup[i] ? 'parece já lançada' : '']
+      .filter(Boolean).map((t) => `<span class="tag">${esc(t)}</span>`).join('');
+    return `${titulo}<div class="imp-row ${marca ? '' : 'off'}"><input type="checkbox" name="inc" value="${i}" ${marca ? 'checked' : ''} aria-label="Incluir ${esc(p.descricao)}">
+      <div class="li-main"><span class="li-t">${esc(p.descricao)}</span>
+        <span class="meta"><input type="text" name="cat${i}" list="dl-cat-of" value="${esc(p.categoria)}" aria-label="Categoria de ${esc(p.descricao)}"><span class="li-s num">${dataCurta(p.data_compra)}</span>${tags}</span></div>
+      <span class="li-v num"><span class="${p.tipo === 'entrada' || p.valor < 0 ? 'pos' : ''}">${p.tipo === 'entrada' ? '+' : ''}${brl(p.valor, 2)}</span></span></div>`;
+  }).join('');
+  modal.classList.add('wide');
+  modal.innerHTML = `
+  <form method="dialog" id="f-of">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+      <div style="min-width:0"><h2 class="h2">revisar transações</h2><div class="muted" style="font-size:11px;margin-top:2px">vindas do banco pelo Open Finance</div></div>
+      <button class="btn icon" value="cancel" formnovalidate aria-label="Fechar">${ico('fechar', 18)}</button>
+    </div>
+    <div class="imp-sum"><span class="on" id="of-n"></span>${dup.some(Boolean) ? `<span>${pl(dup.filter(Boolean).length, 'parece já lançada', 'parecem já lançadas')}</span>` : ''}</div>
+    <label class="imp-all"><input type="checkbox" id="of-all"> selecionar todas · confira as categorias; as que você corrigir serão lembradas</label>
+    <div class="imp-box">${linhas}</div>
+    <label class="check" id="of-old-wrap" hidden><input type="checkbox" name="rmold" checked><span id="of-old"></span></label>
+    <datalist id="dl-cat-of">${cats.map((c) => `<option value="${esc(c)}">`).join('')}</datalist>
+    <div class="error" id="f-err" role="alert"></div>
+    <div class="imp-total"><div><div class="muted" id="of-tot-l">total selecionado</div><strong class="num" id="of-tot"></strong></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" value="descartar" id="of-desc" style="min-height:52px;padding:0 18px">descartar</button>
+        <button class="btn lime" value="ok" id="of-ok" style="min-height:52px;padding:0 24px;font-size:15px">importar</button></div></div>
+  </form>`;
+  const f = modal.querySelector('form');
+  const incs = [...f.querySelectorAll('input[name="inc"]')];
+  const selecionadas = () => incs.filter((c) => c.checked).map((c) => ps[+c.value]);
+  // lançamento manual com o total do cartão no mesmo mês (ex.: "Nubank"), como na importação da fatura
+  const totaisAntigos = () => {
+    const alvos = new Set(selecionadas().filter(ehCartaoOf).map((p) => `${p.ano}|${p.mes}|${nomeConta(contaDe(p.conta_id)).toLowerCase()}`));
+    return S.lancs.filter((l) => l.tipo === 'saida' && !l.cartao && ehCartao(l)
+      && [...alvos].some((a) => { const [an, me, nome] = a.split('|'); return l.ano === +an && l.mes === +me && nome && l.descricao.toLowerCase().includes(nome); }));
+  };
+  const atualizar = () => {
+    const sel = selecionadas();
+    incs.forEach((c) => c.closest('.imp-row').classList.toggle('off', !c.checked));
+    f.querySelector('#of-all').checked = sel.length === incs.length;
+    f.querySelector('#of-n').textContent = `${sel.length} de ${incs.length} selecionadas`;
+    const sai = sel.filter((p) => p.tipo === 'saida').reduce((a, p) => a + p.valor, 0), ent = sel.filter((p) => p.tipo === 'entrada').reduce((a, p) => a + p.valor, 0);
+    f.querySelector('#of-tot-l').textContent = ent ? `saídas · entradas +${brl(ent, 2)}` : 'total selecionado';
+    f.querySelector('#of-tot').textContent = brl(sai, 2);
+    f.querySelector('#of-ok').textContent = sel.length ? `importar ${sel.length}` : 'importar';
+    f.querySelector('#of-desc').textContent = sel.length ? `descartar ${sel.length}` : 'descartar';
+    const old = totaisAntigos();
+    f.querySelector('#of-old-wrap').hidden = !old.length;
+    if (old.length) f.querySelector('#of-old').textContent = `Remover ${old.map((l) => `“${l.descricao}” (${brl(l.valor, 2)}) de ${MESES[l.mes - 1]}`).join(', ')}, já lançado à mão, para não contar a fatura em dobro`;
+  };
+  f.querySelector('#of-all').addEventListener('change', (ev) => { incs.forEach((c) => { c.checked = ev.target.checked; }); atualizar(); });
+  f.addEventListener('change', atualizar);
+  atualizar();
+
+  f.addEventListener('submit', async (ev) => {
+    if (ev.submitter && ev.submitter.value === 'cancel') return;
+    ev.preventDefault();
+    const err = f.querySelector('#f-err');
+    const sel = incs.filter((c) => c.checked);
+    if (!sel.length) { err.textContent = 'Selecione ao menos uma transação.'; return; }
+    const ids = sel.map((c) => ps[+c.value].id);
+    const btn = ev.submitter;
+    try {
+      if (btn && btn.value === 'descartar') {
+        if (!confirm(`Descartar ${pl(sel.length, 'transação', 'transações')}? Elas não voltam nas próximas sincronizações.`)) return;
+        btn.disabled = true;
+        await db.ofMarcar(ids, 'descartada');
+        S.ofMsg = `${pl(sel.length, 'transação descartada', 'transações descartadas')}.`;
+      } else {
+        if (btn) { btn.disabled = true; btn.textContent = 'importando…'; }
+        const rows = sel.map((c) => {
+          const p = ps[+c.value], k = contaDe(p.conta_id);
+          return { ano: p.ano, mes: p.mes, tipo: p.tipo, descricao: p.descricao,
+            categoria: f.elements[`cat${c.value}`].value.trim() || p.categoria, valor: p.valor,
+            cartao: k && k.tipo === 'CREDIT' ? nomeConta(k) : null, data_compra: p.data_compra, import_key: p.import_key };
+        });
+        const antigos = f.rmold.checked && !f.querySelector('#of-old-wrap').hidden ? totaisAntigos() : [];
+        await db.importLancamentos(rows);
+        await db.ofMarcar(ids, 'importada');
+        for (const l of antigos) await db.deleteLancamento(l.id);
+        S.ofMsg = `${pl(rows.length, 'lançamento importado', 'lançamentos importados')}.`;
+      }
+      modal.close();
+      [S.lancs] = await Promise.all([db.listLancamentos(), carregarOf()]);
+      render();
+    } catch (e) { err.textContent = e.message; if (btn) btn.disabled = false; atualizar(); }
+  });
+  modal.showModal();
+}
+
 // ---------------- o módulo ----------------
-const VIEWS = { resumo: viewResumo, lancamentos: viewLancamentos, contas: viewContas, orcamento: viewOrcamento, cartoes: viewCartoes, investimentos: viewInvestimentos, calculadoras: viewCalculadoras, dicas: viewDicas };
+const VIEWS = { resumo: viewResumo, lancamentos: viewLancamentos, contas: viewContas, orcamento: viewOrcamento, cartoes: viewCartoes, bancos: viewBancos, investimentos: viewInvestimentos, calculadoras: viewCalculadoras, dicas: viewDicas };
 
 export default {
   id: 'financas',
   nome: 'Finanças',
   abas: [['resumo', 'Resumo', 'resumo'], ['lancamentos', 'Lançamentos', 'lancamentos'], ['contas', 'Contas', 'contas'], ['orcamento', 'Orçamento', 'orcamento'],
-    ['cartoes', 'Cartões', 'cartoes'], ['investimentos', 'Investimentos', 'investimentos'], ['calculadoras', 'Calculadoras', 'calculadoras'], ['dicas', 'Dicas', 'dicas']],
+    ['cartoes', 'Cartões', 'cartoes'], ['bancos', 'Bancos', 'banco'], ['investimentos', 'Investimentos', 'investimentos'], ['calculadoras', 'Calculadoras', 'calculadoras'], ['dicas', 'Dicas', 'dicas']],
   // barra inferior no celular (5 itens): abas ou uma ação rápida
   barra: ['resumo', 'lancamentos', { acao: 'novo-l', icone: 'plus', rotulo: 'Novo lançamento', attrs: 'data-tipo="saida"' }, 'contas', 'orcamento'],
 
   async carregar(ctx) {
     C = ctx;
-    [S.lancs, S.invs] = await Promise.all([db.listLancamentos(), db.listInvestimentos(), carregarContasOrc()]);
+    [S.lancs, S.invs] = await Promise.all([db.listLancamentos(), db.listInvestimentos(), carregarContasOrc(), carregarOf()]);
     const anos = anosDisponiveis();
     if (!anos.includes(S.ano)) S.ano = anos[anos.length - 1];
+    sincronizarSeAntigo();
   },
 
   render(aba, el, ctx) {
@@ -1479,6 +1723,21 @@ export default {
       contasDosFixos();
     } else if (a === 'teto') {
       tetoForm(b.dataset.cat);
+    } else if (a === 'of-revisar') {
+      ofRevisarForm();
+    } else if (a === 'of-sync') {
+      sincronizarOf();
+    } else if (a === 'of-conectar') {
+      ofConectarForm();
+    } else if (a === 'of-conta') {
+      const k = contaDe(b.dataset.conta);
+      if (k) ofContaForm(k);
+    } else if (a === 'of-remover') {
+      const it = S.of.itens.find((i) => i.item_id === b.dataset.item);
+      if (it && confirm(`Desconectar ${it.nome}? As transações que ainda estão para revisar somem; os lançamentos já importados ficam.`)) {
+        try { await db.ofRemover(it.item_id); S.ofMsg = 'Banco desconectado.'; } catch (e) { S.ofMsg = e.message; }
+        await carregarOf(); render();
+      }
     } else if (a === 'novo-i') {
       invForm({ tipo: TIPOS_INV[0] });
     } else if (a === 'nova-acao') {

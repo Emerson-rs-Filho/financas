@@ -8,24 +8,33 @@ const pl = (n, um, varios) => `${n} ${n === 1 ? um : varios}`;
 const brl = (v) => (+v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
 
 // Funções puras (recebem os dados e a data de hoje), para poderem ser testadas.
+// Contas a pagar do mês: vencidas, vencendo na semana, em aberto ou todas pagas.
+function avisoContas({ contas, pagamentos }, hoje) {
+  const ano = hoje.getFullYear(), mes = hoje.getMonth() + 1;
+  const ultimo = new Date(ano, mes, 0).getDate();
+  const abertas = contas.filter((k) => k.ativa !== false).map((k) => {
+    let venc;
+    if (k.recorrente !== false) venc = new Date(ano, mes - 1, Math.min(k.dia_vencimento || 1, ultimo));
+    else if (k.vencimento && deISO(k.vencimento).getFullYear() === ano && deISO(k.vencimento).getMonth() + 1 === mes) venc = deISO(k.vencimento);
+    else return null;
+    const paga = pagamentos.some((p) => p.conta_id === k.id && p.ano === ano && p.mes === mes);
+    return paga ? null : { k, dias: Math.round((venc - hoje) / 864e5) };
+  }).filter(Boolean);
+  const vencidas = abertas.filter((c) => c.dias < 0);
+  const semana = abertas.filter((c) => c.dias >= 0 && c.dias <= 7);
+  if (vencidas.length) return { texto: pl(vencidas.length, 'conta vencida', 'contas vencidas'), alerta: true };
+  if (semana.length) return { texto: `${pl(semana.length, 'conta vence', 'contas vencem')} em até 7 dias · ${brl(semana.reduce((s, c) => s + (+c.k.valor_previsto || 0), 0))}` };
+  if (abertas.length) return { texto: `${pl(abertas.length, 'conta', 'contas')} a pagar neste mês` };
+  return contas.some((k) => k.ativa !== false) ? { texto: 'contas do mês pagas' } : null;
+}
+
 export const regras = {
-  financas({ contas, pagamentos }, hoje) {
-    const ano = hoje.getFullYear(), mes = hoje.getMonth() + 1;
-    const ultimo = new Date(ano, mes, 0).getDate();
-    const abertas = contas.filter((k) => k.ativa !== false).map((k) => {
-      let venc;
-      if (k.recorrente !== false) venc = new Date(ano, mes - 1, Math.min(k.dia_vencimento || 1, ultimo));
-      else if (k.vencimento && deISO(k.vencimento).getFullYear() === ano && deISO(k.vencimento).getMonth() + 1 === mes) venc = deISO(k.vencimento);
-      else return null;
-      const paga = pagamentos.some((p) => p.conta_id === k.id && p.ano === ano && p.mes === mes);
-      return paga ? null : { k, dias: Math.round((venc - hoje) / 864e5) };
-    }).filter(Boolean);
-    const vencidas = abertas.filter((c) => c.dias < 0);
-    const semana = abertas.filter((c) => c.dias >= 0 && c.dias <= 7);
-    if (vencidas.length) return { texto: pl(vencidas.length, 'conta vencida', 'contas vencidas'), alerta: true };
-    if (semana.length) return { texto: `${pl(semana.length, 'conta vence', 'contas vencem')} em até 7 dias · ${brl(semana.reduce((s, c) => s + (+c.k.valor_previsto || 0), 0))}` };
-    if (abertas.length) return { texto: `${pl(abertas.length, 'conta', 'contas')} a pagar neste mês` };
-    return contas.some((k) => k.ativa !== false) ? { texto: 'contas do mês pagas' } : null;
+  // contas a pagar + transações do Open Finance esperando revisão (conta vencida tem prioridade)
+  financas({ contas, pagamentos, pendentes = 0 }, hoje) {
+    const aviso = avisoContas({ contas, pagamentos }, hoje);
+    if (!pendentes || (aviso && aviso.alerta)) return aviso;
+    const banco = pl(pendentes, 'transação do banco', 'transações do banco') + ' para revisar';
+    return { texto: aviso ? `${banco} · ${aviso.texto}` : banco };
   },
   compras(itens) {
     const n = itens.filter((i) => !i.comprado).length;
@@ -70,7 +79,11 @@ export const regras = {
 };
 
 const FONTES = {
-  financas: () => db.listContas(),
+  financas: async () => {
+    // sem as tabelas do Open Finance (schema antigo), o aviso das contas continua aparecendo
+    const [k, pendentes] = await Promise.all([db.listContas(), db.ofContarPendentes().catch(() => 0)]);
+    return { ...k, pendentes };
+  },
   compras: () => db.listCompras(),
   reparos: () => db.listReparos(),
   documentos: () => db.listDocumentos(),

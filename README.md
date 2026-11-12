@@ -2,7 +2,7 @@
 
 App web para gerenciar a casa. Depois do login aparece a tela inicial com as **áreas da casa**:
 
-- **Finanças** — resumo do ano com gráficos, lançamentos mês a mês, cartões (com importação da fatura do Nubank), investimentos, calculadoras e dicas de economia.
+- **Finanças** — resumo do ano com gráficos, lançamentos mês a mês, cartões (com importação da fatura do Nubank), bancos pelo Open Finance, investimentos, calculadoras e dicas de economia.
 - **Calendário** — a agenda da família, conectada ao Google Agenda.
 - **Lista de compras** — compartilhada entre vocês dois, atualiza na hora nos dois celulares e recebe itens pela Alexa ("Alexa, peça à nossa casa para adicionar leite").
 - **Reparos e melhorias** — o que consertar ou melhorar na casa, por cômodo e prioridade, com fotos de antes e depois.
@@ -130,6 +130,38 @@ Cada pessoa da casa entra no app com o próprio login, conecta **a sua** conta G
    O `APP_URL` é o endereço do app no GitHub Pages, com a barra no final. **Não troque o `TOKEN_KEY` depois**: sem ele, os tokens já guardados não podem mais ser lidos e todos precisam conectar de novo.
 4. **Opcional:** para sincronizar mesmo com o app fechado, use o trecho do `pg_cron` que está comentado no fim do `schema.sql`. Sem ele, o app sincroniza sempre que alguém abre o calendário e já se passaram 5 minutos desde a última vez, e também pelo botão de sincronizar.
 
+## Passo 6 — Bancos pelo Open Finance (MeuPluggy, opcional)
+
+As compras do cartão e as movimentações da conta chegam sozinhas, uma vez por dia, na aba **Finanças → Bancos**. Lá você confere a categoria e confirma. Nada vira lançamento sem passar por essa revisão.
+
+Uma pessoa não pode ligar o app direto nas APIs do Open Finance, porque elas só atendem instituições autorizadas pelo Banco Central. O caminho gratuito é o **MeuPluggy**: você autoriza seus bancos lá, e a função `openfinance` lê os **seus próprios** dados pela API da Pluggy. Confira no site da Pluggy se o uso pessoal continua gratuito, porque as condições podem mudar.
+
+**Uma vez só:**
+
+1. Rode de novo o `supabase/schema.sql` no SQL Editor. Ele cria as tabelas `of_itens`, `of_contas` e `of_pendentes`.
+2. Em https://meu.pluggy.ai, crie a conta e conecte seus bancos (Nubank, conta corrente…). A autorização acontece no app do próprio banco, pelo fluxo oficial do Open Finance.
+3. Em https://dashboard.pluggy.ai, crie a conta de desenvolvedor e uma aplicação. Copie o **Client ID** e o **Client Secret**. Na aplicação, conecte o **MeuPluggy** e copie o código da conexão (**item id**, no formato `1a2b3c4d-…`).
+4. Dentro desta pasta, configure os secrets e publique a função:
+   ```bash
+   npx supabase secrets set PLUGGY_CLIENT_ID=COLE-O-ID PLUGGY_CLIENT_SECRET=COLE-O-SECRET
+   npx supabase functions deploy openfinance --no-verify-jwt
+   ```
+   Para o agendamento diário, a função usa o mesmo `CRON_SECRET` do Passo 5. Se você não fez o Passo 5, crie um com `npx supabase secrets set CRON_SECRET=$(openssl rand -hex 32)`.
+5. No app, abra **Finanças → Bancos → conectar banco** e cole o item id. A primeira busca traz as transações desde o começo do mês passado.
+6. Toque em cada cartão e dê o mesmo nome usado na importação da fatura (ex.: *Nubank*). Assim as compras ficam juntas na aba Cartões. Ali também dá para desligar uma conta que você não quer acompanhar, como a poupança.
+7. **Opcional:** para buscar todo dia às 6h mesmo com o app fechado, use o trecho do `pg_cron` comentado no fim do `schema.sql` (`openfinance-sync`). Sem ele, o app busca sozinho ao abrir Finanças quando a última busca foi há mais de 12 horas, e também pelo botão *sincronizar*.
+
+**Bom saber:**
+
+- **Mês de cada compra:** a compra no cartão entra no mês de vencimento da fatura, como na importação do CSV. Quando o banco ainda não informa a fatura, ela vai para o mês seguinte ao da compra. Dá para ajustar depois, editando o lançamento.
+- **O que não entra:**
+  - O pagamento da fatura é ignorado, para não contar as compras em dobro.
+  - Transferências entre as suas contas e aplicações/resgates vêm desmarcadas.
+  - O que já parece lançado (pelo CSV, à mão ou por uma conta paga) também vem desmarcado.
+- **Total manual do cartão:** se houver no mês um lançamento manual com o total do cartão (ex.: "Nubank"), a revisão oferece removê-lo, como a importação da fatura já faz.
+- **Descartadas e importadas:** não voltam nas próximas buscas.
+- **Autorização vencida:** a autorização do Open Finance vence (em geral, em até 12 meses). Quando isso acontece, a aba Bancos mostra o aviso, e é só reconectar no MeuPluggy. O item id continua o mesmo.
+
 ## Como usar
 
 Depois de entrar, escolha a área na tela inicial. Para trocar de área: no computador, use os ícones no topo do menu lateral (ou clique em *nossa casa.*); no celular, toque no nome da área no topo ou abra o menu ☰ → *áreas da casa*. Links antigos como `#lancamentos` continuam funcionando e abrem `#financas/lancamentos`.
@@ -141,6 +173,7 @@ Depois de entrar, escolha a área na tela inicial. Para trocar de área: no comp
 - **Contas:** as contas com vencimento (aluguel, luz, internet, escola…). Para cada mês mostra o que está vencido, o que vence nos próximos 7 dias e o que já foi pago. **Pagar** cria o lançamento de saída sozinho (com o valor e a data que você confirmar); **desfazer** apaga o pagamento e o lançamento. *Criar dos fixos* transforma os fixos do mês anterior em contas recorrentes — a partir daí não precisa mais copiar fixos (o botão de copiar passa a ignorar o que já é conta, para não lançar em dobro). Uma conta pode ser mensal ou avulsa, e pode ser pausada sem perder o histórico.
 - **Orçamento:** teto mensal por categoria (mercado, delivery, lazer…). Mostra quanto já foi gasto no mês, com barra verde até 80%, laranja até 100% e vermelha acima. A sugestão de teto é a média mensal da categoria no ano. O **Resumo** avisa no topo quando há conta vencida ou vencendo em até 3 dias e quando uma categoria passa de 80% do teto.
 - **Cartões:** faturas por mês, comparação entre os cartões e, para faturas importadas, os gastos do cartão por categoria.
+- **Bancos:** transações que chegaram pelo Open Finance, para conferir e importar (veja o Passo 6). Quando há transações esperando, aparece um aviso no Resumo e na tela inicial.
 
 > **Já usa o app?** Para ativar Contas e Orçamento, rode de novo o `supabase/schema.sql` no SQL Editor (cria as tabelas `orcamentos`, `contas` e `contas_pagamentos`; não mexe nos dados).
 - **Importar fatura (Nubank):** no app do Nubank, abra a fatura e exporte em CSV (arquivo `Nubank_AAAA-MM-DD.csv`). Em *Lançamentos* ou *Cartões*, clique em **Importar fatura** e escolha o arquivo. Cada compra vira um lançamento no mês da fatura (data do nome do arquivo), com categoria sugerida; revise e clique em *Importar*. O pagamento da fatura anterior é ignorado, estornos entram negativos e importar o mesmo arquivo de novo não duplica nada. As categorias que vocês corrigirem são lembradas nas próximas faturas. Se o mês já tiver uma linha "Nubank" com o total da fatura, o app oferece removê-la para não contar em dobro.
@@ -262,7 +295,9 @@ alexa/modelo-pt-BR.json        modelo de voz da skill (colar no console da Alexa
 supabase/functions/alexa/      função que atende a skill (usa uma cópia de itens.js; financas.js e os outros módulos têm cada assunto)
 js/data.js            Supabase / modo demonstração
 js/insights.js        cálculos e dicas
-js/importar.js        leitura do CSV do Nubank e sugestão de categorias
+js/importar.js        leitura do CSV do Nubank
+js/categorias.js      sugestão de categorias (cópia em supabase/functions/openfinance/)
+supabase/functions/openfinance/  traz as transações do Open Finance (MeuPluggy) para revisão
 js/calc.js            fórmulas das calculadoras
 supabase/functions/cotacoes/  função que busca Yahoo + Banco Central
 js/seed.js            dados da planilha (2026)
