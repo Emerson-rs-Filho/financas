@@ -78,6 +78,8 @@ A Amazon desligou em julho de 2024 o acesso de outros apps à lista de compras n
 - "Alexa, diga à nossa casa que paguei a conta de luz" (marca como paga e cria a saída, igual ao botão *pagar*; sem valor dito, usa o previsto. Dá para dizer o valor: "paguei a internet, 99 e 90")
 - "Alexa, peça à nossa casa para anotar um gasto de 45 reais na padaria" (entra em Lançamentos no mês atual; a categoria vem do último gasto com o mesmo nome ou de palavras-chave como mercado, farmácia e gasolina)
 - "Alexa, pergunte à nossa casa quanto ainda posso gastar com mercado" (teto do Orçamento menos o gasto do mês; sem categoria, fala o resumo do orçamento)
+- "Alexa, pergunte à nossa casa quanto falta para a meta da viagem" (Metas e sonhos: quanto falta e quanto guardar por mês até o prazo; "como estão as metas" fala todas)
+- "Alexa, diga à nossa casa que guardei 200 reais na viagem" (registra o valor guardado na meta; metas ligadas a um investimento seguem o valor dele e não recebem por voz)
 - "Alexa, peça à nossa casa para anotar um reparo torneira da cozinha pingando" (entra em Reparos e melhorias)
 
 > "Alexa, adiciona leite na lista" (sem "nossa casa") continua indo para a lista **nativa** da Alexa, não para o app.
@@ -100,7 +102,7 @@ A Amazon desligou em julho de 2024 o acesso de outros apps à lista de compras n
 
 A função confere que cada pedido veio mesmo da Alexa (assinatura da Amazon) e da sua skill (Skill ID), e grava na lista com a chave de serviço, que fica só no servidor do Supabase.
 
-**Já tinha a skill?** Para ganhar as frases novas (contas, gastos, orçamento e reparos): cole de novo o `alexa/modelo-pt-BR.json` no **JSON Editor** (Save e Build skill) e publique a função outra vez com `npx supabase functions deploy alexa --no-verify-jwt`.
+**Já tinha a skill?** Para ganhar as frases novas (contas, gastos, orçamento, metas e reparos): cole de novo o `alexa/modelo-pt-BR.json` no **JSON Editor** (Save e Build skill) e publique a função outra vez com `npx supabase functions deploy alexa --no-verify-jwt`.
 
 **Dica:** no app Alexa, crie uma **Rotina** com uma frase curta (ex.: "acabou o café") que dispara "peça à nossa casa para adicionar café".
 

@@ -278,6 +278,67 @@
             "quanto gastei este mês",
             "os gastos do mês"
           ]
+        },
+        {
+          "name": "MetaIntent",
+          "slots": [
+            {
+              "name": "item",
+              "type": "AMAZON.SearchQuery",
+              "samples": [
+                "{item}"
+              ]
+            }
+          ],
+          "samples": [
+            "quanto falta para a meta {item}",
+            "quanto falta pra meta {item}",
+            "quanto falta na meta {item}",
+            "quanto falta para a meta da {item}",
+            "quanto falta para a meta do {item}",
+            "quanto falta para o sonho {item}",
+            "como está a meta {item}",
+            "como está a meta da {item}",
+            "como está a meta do {item}",
+            "como anda a meta {item}",
+            "quanto já guardei para {item}",
+            "quanto já guardei pra {item}",
+            "quanto tem guardado para {item}",
+            "quanto tem guardado pra {item}",
+            "como estão as metas",
+            "como andam as metas",
+            "as metas",
+            "quanto falta para as metas",
+            "como estão os sonhos",
+            "as metas e sonhos"
+          ]
+        },
+        {
+          "name": "GuardarMetaIntent",
+          "slots": [
+            {
+              "name": "item",
+              "type": "AMAZON.SearchQuery",
+              "samples": [
+                "{item}"
+              ]
+            }
+          ],
+          "samples": [
+            "guardei {item}",
+            "já guardei {item}",
+            "eu guardei {item}",
+            "que guardei {item}",
+            "que eu guardei {item}",
+            "que já guardei {item}",
+            "juntei {item}",
+            "que juntei {item}",
+            "coloquei {item} na meta",
+            "guardar {item} na meta",
+            "guarda {item} na meta",
+            "guardar dinheiro",
+            "guardei dinheiro"
+          ]
         }
       ],
       "types": []
@@ -368,6 +429,23 @@
               }
             }
           ]
+        },
+        {
+          "name": "GuardarMetaIntent",
+          "delegationStrategy": "ALWAYS",
+          "confirmationRequired": false,
+          "prompts": {},
+          "slots": [
+            {
+              "name": "item",
+              "type": "AMAZON.SearchQuery",
+              "elicitationRequired": true,
+              "confirmationRequired": false,
+              "prompts": {
+                "elicitation": "Elicit.Slot.GuardarMeta.item"
+              }
+            }
+          ]
         }
       ],
       "delegationStrategy": "ALWAYS"
@@ -419,6 +497,15 @@
           {
             "type": "PlainText",
             "value": "Qual conta você pagou?"
+          }
+        ]
+      },
+      {
+        "id": "Elicit.Slot.GuardarMeta.item",
+        "variations": [
+          {
+            "type": "PlainText",
+            "value": "Quanto você guardou, e para qual meta?"
           }
         ]
       }
