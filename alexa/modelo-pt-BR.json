@@ -339,6 +339,32 @@
             "guardar dinheiro",
             "guardei dinheiro"
           ]
+        },
+        {
+          "name": "ResumoIntent",
+          "slots": [],
+          "samples": [
+            "como está a casa",
+            "como está a casa hoje",
+            "como estão as coisas hoje",
+            "resumo do dia",
+            "o resumo do dia",
+            "o resumo",
+            "resumo",
+            "me dá o resumo",
+            "me dá o resumo do dia",
+            "me dê o resumo do dia",
+            "o que tem hoje",
+            "o que tem para hoje",
+            "o que tem pra hoje",
+            "o que eu tenho hoje",
+            "o que temos hoje",
+            "como vai ser o dia",
+            "como vai ser hoje",
+            "bom dia",
+            "o que tem de novo",
+            "as novidades"
+          ]
         }
       ],
       "types": []

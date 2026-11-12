@@ -8,6 +8,7 @@
 //   "Alexa, pergunte à nossa casa quanto ainda posso gastar com mercado"
 //   "Alexa, pergunte à nossa casa quanto falta para a meta da viagem"
 //   "Alexa, diga à nossa casa que guardei 200 reais na viagem"
+//   "Alexa, pergunte à nossa casa como está a casa hoje" (resumo do dia)
 //   "Alexa, peça à nossa casa para anotar um reparo torneira pingando"
 // Deploy (veja o README):
 //   npx supabase secrets set ALEXA_SKILL_ID=amzn1.ask.skill.xxxx
@@ -18,6 +19,7 @@ import { separarItens, normalizar } from './itens.js';
 import { capital, juntar } from './comum.js';
 import { anotarGasto, faltaPagar, orcamento, pagarConta } from './financas.js';
 import { guardarNaMeta, metaSituacao } from './metas.js';
+import { resumoDoDia } from './resumo.js';
 
 const SKILL_ID = Deno.env.get('ALEXA_SKILL_ID') ?? '';
 // A chave service_role só existe aqui no servidor (o Supabase a injeta nas Edge Functions); nunca vai para o navegador.
@@ -127,10 +129,11 @@ const PEDIDOS: [RegExp, string][] = [
   [/^(?:quanto (?:ainda )?(?:posso|da para|da pra) gastar|como (?:esta|anda) o orcamento|quanto (?:ja )?gastei)\b/, 'OrcamentoIntent'],
   [/^(?:quanto falta (?:para|pra|na) (?:a |as )?metas?|como (?:esta|estao|andam) (?:a |as )?metas?|quanto (?:ja )?(?:guardei|tem guardado) (?:para|pra))\b/, 'MetaIntent'],
   [/^(?:ja )?(?:guardei|juntei)\b/, 'GuardarMetaIntent'],
+  [/^(?:(?:o |me da o |me de o )?resumo(?: do dia)?|como esta a casa|o que tem (?:para |pra )?hoje|bom dia|como vai ser o dia)\b/, 'ResumoIntent'],
 ];
 const falado = (i: { nome: string; quantidade?: string | null }) =>
   (!i.quantidade ? i.nome : /[a-zà-ú]/i.test(i.quantidade) ? `${i.quantidade} de ${i.nome}` : `${i.quantidade} ${i.nome}`).toLowerCase();
-const AJUDA = 'Você pode dizer: adiciona leite e pão; o que tem na lista; já comprei leite; quanto falta pagar; paguei a conta de luz; '
+const AJUDA = 'Você pode dizer: como está a casa hoje; adiciona leite e pão; o que tem na lista; já comprei leite; quanto falta pagar; paguei a conta de luz; '
   + 'anotar um gasto de 45 reais na padaria; quanto ainda posso gastar com mercado; quanto falta para a meta da viagem; '
   + 'guardei 200 reais na viagem; ou anotar um reparo.';
 
@@ -229,6 +232,7 @@ async function executar(nome: string, item: string, sessao: any): Promise<Respon
     case 'OrcamentoIntent': return responder(nome, await orcamento(db, item));
     case 'MetaIntent': return responder(nome, await metaSituacao(db, item));
     case 'GuardarMetaIntent': return responder(nome, await guardarNaMeta(db, item, sessao));
+    case 'ResumoIntent': return fala(await resumoDoDia(db));
     case 'AnotarReparoIntent': return await anotarReparo(item);
     case 'AMAZON.HelpIntent': return fala(AJUDA, false, 'O que eu coloco na lista?');
     case 'AMAZON.StopIntent': case 'AMAZON.CancelIntent': case 'AMAZON.NavigateHomeIntent': return fala('Até mais!');

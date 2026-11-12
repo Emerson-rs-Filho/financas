@@ -66,10 +66,11 @@ npx supabase functions deploy cotacoes --no-verify-jwt
 
 O `--no-verify-jwt` é necessário porque a própria função confere o login. Sem a função publicada, as calculadoras de Meta, Projeção e Renda fixa continuam funcionando com uma taxa digitada à mão. Só o simulador de **Histórico** precisa dela.
 
-## Passo 4 — Lista de compras pela Alexa (skill particular)
+## Passo 4 — Alexa: lista de compras, finanças e resumo do dia (skill particular)
 
 A Amazon desligou em julho de 2024 o acesso de outros apps à lista de compras nativa da Alexa. Por isso o Nossa Casa tem a **própria skill**, que só existe na sua conta (fica em modo de desenvolvimento, não vai para a loja e é grátis). Você fala com ela começando por "nossa casa":
 
+- "Alexa, pergunte à nossa casa como está a casa hoje" (resumo do dia: agenda, contas vencidas ou vencendo hoje e amanhã, tarefas da casa, cardápio e quantos itens tem na lista; o que não estiver configurado fica de fora)
 - "Alexa, peça à nossa casa para adicionar leite e pão"
 - "Alexa, pergunte à nossa casa o que tem na lista"
 - "Alexa, diga à nossa casa que já comprei leite"
@@ -102,9 +103,9 @@ A Amazon desligou em julho de 2024 o acesso de outros apps à lista de compras n
 
 A função confere que cada pedido veio mesmo da Alexa (assinatura da Amazon) e da sua skill (Skill ID), e grava na lista com a chave de serviço, que fica só no servidor do Supabase.
 
-**Já tinha a skill?** Para ganhar as frases novas (contas, gastos, orçamento, metas e reparos): cole de novo o `alexa/modelo-pt-BR.json` no **JSON Editor** (Save e Build skill) e publique a função outra vez com `npx supabase functions deploy alexa --no-verify-jwt`.
+**Já tinha a skill?** Para ganhar as frases novas (resumo do dia, contas, gastos, orçamento, metas e reparos): cole de novo o `alexa/modelo-pt-BR.json` no **JSON Editor** (Save e Build skill) e publique a função outra vez com `npx supabase functions deploy alexa --no-verify-jwt`.
 
-**Dica:** no app Alexa, crie uma **Rotina** com uma frase curta (ex.: "acabou o café") que dispara "peça à nossa casa para adicionar café".
+**Dica:** no app Alexa, crie uma **Rotina** com uma frase curta (ex.: "acabou o café") que dispara "peça à nossa casa para adicionar café". Outra boa: uma rotina às 7h (ou com a frase "bom dia") que dispara "pergunte à nossa casa como está a casa hoje", e o Echo já fala o resumo do dia.
 
 ## Passo 5 — Calendário (Google Agenda)
 
