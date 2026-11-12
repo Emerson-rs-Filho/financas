@@ -75,6 +75,9 @@ A Amazon desligou em julho de 2024 o acesso de outros apps à lista de compras n
 - "Alexa, diga à nossa casa que já comprei leite"
 - "Alexa, abre nossa casa" → "adiciona café"
 - "Alexa, pergunte à nossa casa quanto falta pagar" (contas do mês em Finanças)
+- "Alexa, diga à nossa casa que paguei a conta de luz" (marca como paga e cria a saída, igual ao botão *pagar*; sem valor dito, usa o previsto. Dá para dizer o valor: "paguei a internet, 99 e 90")
+- "Alexa, peça à nossa casa para anotar um gasto de 45 reais na padaria" (entra em Lançamentos no mês atual; a categoria vem do último gasto com o mesmo nome ou de palavras-chave como mercado, farmácia e gasolina)
+- "Alexa, pergunte à nossa casa quanto ainda posso gastar com mercado" (teto do Orçamento menos o gasto do mês; sem categoria, fala o resumo do orçamento)
 - "Alexa, peça à nossa casa para anotar um reparo torneira da cozinha pingando" (entra em Reparos e melhorias)
 
 > "Alexa, adiciona leite na lista" (sem "nossa casa") continua indo para a lista **nativa** da Alexa, não para o app.
@@ -97,7 +100,7 @@ A Amazon desligou em julho de 2024 o acesso de outros apps à lista de compras n
 
 A função confere que cada pedido veio mesmo da Alexa (assinatura da Amazon) e da sua skill (Skill ID), e grava na lista com a chave de serviço, que fica só no servidor do Supabase.
 
-**Já tinha a skill?** Para ganhar as frases de contas e reparos: cole de novo o `alexa/modelo-pt-BR.json` no **JSON Editor** (Save e Build skill) e publique a função outra vez com `npx supabase functions deploy alexa --no-verify-jwt`.
+**Já tinha a skill?** Para ganhar as frases novas (contas, gastos, orçamento e reparos): cole de novo o `alexa/modelo-pt-BR.json` no **JSON Editor** (Save e Build skill) e publique a função outra vez com `npx supabase functions deploy alexa --no-verify-jwt`.
 
 **Dica:** no app Alexa, crie uma **Rotina** com uma frase curta (ex.: "acabou o café") que dispara "peça à nossa casa para adicionar café".
 
@@ -253,7 +256,7 @@ supabase/functions/google-auth/  conecta/desconecta a conta Google (OAuth)
 supabase/functions/agenda/       sincroniza, cria e exclui eventos no Google Agenda
 supabase/functions/_shared/      código comum das duas (tokens cifrados, Calendar API)
 alexa/modelo-pt-BR.json        modelo de voz da skill (colar no console da Alexa)
-supabase/functions/alexa/      função que atende a skill (usa uma cópia de itens.js)
+supabase/functions/alexa/      função que atende a skill (usa uma cópia de itens.js; financas.js e os outros módulos têm cada assunto)
 js/data.js            Supabase / modo demonstração
 js/insights.js        cálculos e dicas
 js/importar.js        leitura do CSV do Nubank e sugestão de categorias

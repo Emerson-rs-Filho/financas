@@ -171,6 +171,113 @@
             "anota um reparo",
             "novo reparo"
           ]
+        },
+        {
+          "name": "GastoIntent",
+          "slots": [
+            {
+              "name": "item",
+              "type": "AMAZON.SearchQuery",
+              "samples": [
+                "{item}"
+              ]
+            }
+          ],
+          "samples": [
+            "anotar um gasto de {item}",
+            "anota um gasto de {item}",
+            "anote um gasto de {item}",
+            "anotar um gasto {item}",
+            "anota um gasto {item}",
+            "anotar gasto de {item}",
+            "anota gasto de {item}",
+            "para anotar um gasto de {item}",
+            "pra anotar um gasto de {item}",
+            "lançar um gasto de {item}",
+            "lança um gasto de {item}",
+            "registrar um gasto de {item}",
+            "registra um gasto de {item}",
+            "anotar uma despesa de {item}",
+            "anota uma despesa de {item}",
+            "gastei {item}",
+            "eu gastei {item}",
+            "que gastei {item}",
+            "que eu gastei {item}",
+            "anotar um gasto",
+            "anota um gasto",
+            "novo gasto"
+          ]
+        },
+        {
+          "name": "PagarContaIntent",
+          "slots": [
+            {
+              "name": "item",
+              "type": "AMAZON.SearchQuery",
+              "samples": [
+                "{item}"
+              ]
+            }
+          ],
+          "samples": [
+            "paguei {item}",
+            "já paguei {item}",
+            "eu paguei {item}",
+            "que paguei {item}",
+            "que já paguei {item}",
+            "paguei a conta de {item}",
+            "paguei a conta da {item}",
+            "paguei a conta do {item}",
+            "já paguei a conta de {item}",
+            "que paguei a conta de {item}",
+            "marcar a conta de {item} como paga",
+            "marca a conta de {item} como paga",
+            "marque a conta de {item} como paga",
+            "marcar {item} como paga",
+            "marca {item} como paga",
+            "marca {item} como pago",
+            "paguei uma conta",
+            "paguei a conta"
+          ]
+        },
+        {
+          "name": "OrcamentoIntent",
+          "slots": [
+            {
+              "name": "item",
+              "type": "AMAZON.SearchQuery",
+              "samples": [
+                "{item}"
+              ]
+            }
+          ],
+          "samples": [
+            "quanto ainda posso gastar com {item}",
+            "quanto posso gastar com {item}",
+            "quanto ainda posso gastar em {item}",
+            "quanto posso gastar em {item}",
+            "quanto ainda dá para gastar com {item}",
+            "quanto ainda dá pra gastar com {item}",
+            "quanto sobra para {item}",
+            "quanto sobrou para {item}",
+            "como está o orçamento de {item}",
+            "como está o orçamento do {item}",
+            "como está o orçamento da {item}",
+            "quanto já gastei com {item}",
+            "quanto gastei com {item}",
+            "quanto gastei em {item}",
+            "quanto já gastei em {item}",
+            "como está o orçamento",
+            "como está o orçamento do mês",
+            "como anda o orçamento",
+            "o orçamento",
+            "quanto ainda posso gastar",
+            "quanto ainda posso gastar este mês",
+            "quanto já gastei",
+            "quanto já gastei este mês",
+            "quanto gastei este mês",
+            "os gastos do mês"
+          ]
         }
       ],
       "types": []
@@ -227,6 +334,40 @@
               }
             }
           ]
+        },
+        {
+          "name": "GastoIntent",
+          "delegationStrategy": "ALWAYS",
+          "confirmationRequired": false,
+          "prompts": {},
+          "slots": [
+            {
+              "name": "item",
+              "type": "AMAZON.SearchQuery",
+              "elicitationRequired": true,
+              "confirmationRequired": false,
+              "prompts": {
+                "elicitation": "Elicit.Slot.Gasto.item"
+              }
+            }
+          ]
+        },
+        {
+          "name": "PagarContaIntent",
+          "delegationStrategy": "ALWAYS",
+          "confirmationRequired": false,
+          "prompts": {},
+          "slots": [
+            {
+              "name": "item",
+              "type": "AMAZON.SearchQuery",
+              "elicitationRequired": true,
+              "confirmationRequired": false,
+              "prompts": {
+                "elicitation": "Elicit.Slot.PagarConta.item"
+              }
+            }
+          ]
         }
       ],
       "delegationStrategy": "ALWAYS"
@@ -260,6 +401,24 @@
           {
             "type": "PlainText",
             "value": "Qual é o reparo?"
+          }
+        ]
+      },
+      {
+        "id": "Elicit.Slot.Gasto.item",
+        "variations": [
+          {
+            "type": "PlainText",
+            "value": "Quanto foi o gasto, e onde?"
+          }
+        ]
+      },
+      {
+        "id": "Elicit.Slot.PagarConta.item",
+        "variations": [
+          {
+            "type": "PlainText",
+            "value": "Qual conta você pagou?"
           }
         ]
       }
