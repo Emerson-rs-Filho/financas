@@ -235,6 +235,16 @@ async function copiarMesAnterior() {
   render();
 }
 
+// Compra no cartão anotada pela Alexa (import_key "alexa|…") com o mesmo valor e até 3 dias de diferença:
+// a data de quem fala é o dia em que falou, e o banco pode registrar a compra um ou dois dias antes ou depois.
+// Usado na importação do CSV e na revisão do Open Finance para não lançar a mesma compra duas vezes.
+function anotadaPelaAlexa(valor, data) {
+  const t = Date.parse(data || '');
+  if (!t) return null;
+  return S.lancs.find((l) => String(l.import_key || '').startsWith('alexa|') && l.cartao && l.data_compra
+    && Math.abs(l.valor - valor) < 0.005 && Math.abs(Date.parse(l.data_compra) - t) <= 3 * 864e5) || null;
+}
+
 // ---------------- Importar fatura (CSV do Nubank) ----------------
 function escolherFatura() {
   const inp = document.createElement('input');
@@ -271,9 +281,11 @@ function importForm(p, fileName) {
     <label class="imp-all"><input type="checkbox" id="imp-all" checked> selecionar todos · confira as categorias; as que você corrigir serão lembradas</label>
     <div class="imp-box">${p.linhas.map((l, i) => {
       const dup = ja.has(l.import_key);
-      return `<div class="imp-row ${dup ? 'off' : ''}"><input type="checkbox" name="inc" value="${i}" ${dup ? '' : 'checked'} aria-label="Incluir ${esc(l.titulo)}">
+      const alexa = !dup && l.valor > 0 && !!anotadaPelaAlexa(l.valor, l.data);
+      const tag = dup ? '<span class="tag">já importada</span>' : alexa ? '<span class="tag">anotada pela Alexa</span>' : '';
+      return `<div class="imp-row ${dup || alexa ? 'off' : ''}"><input type="checkbox" name="inc" value="${i}" ${dup || alexa ? '' : 'checked'} aria-label="Incluir ${esc(l.titulo)}">
         <div class="li-main"><span class="li-t">${esc(l.titulo)}</span>
-          <span class="meta"><input type="text" name="cat${i}" list="dl-cat-imp" value="${esc(l.categoria)}" aria-label="Categoria de ${esc(l.titulo)}"><span class="li-s num">${dataCurta(l.data)}</span>${dup ? '<span class="tag">já importada</span>' : ''}</span></div>
+          <span class="meta"><input type="text" name="cat${i}" list="dl-cat-imp" value="${esc(l.categoria)}" aria-label="Categoria de ${esc(l.titulo)}"><span class="li-s num">${dataCurta(l.data)}</span>${tag}</span></div>
         <span class="li-v num"><span class="${l.valor < 0 ? 'pos' : ''}">${brl(l.valor, 2)}</span></span></div>`;
     }).join('')}</div>
     <label class="check" id="imp-old-wrap" hidden><input type="checkbox" name="rmold" checked><span id="imp-old"></span></label>
@@ -1450,8 +1462,10 @@ function sincronizarSeAntigo() {
 }
 
 // Já lançada pela importação do CSV, à mão ou por uma conta paga? Vem desmarcada.
+// Devolve 'alexa' quando bate com uma compra no cartão anotada por voz, true para os outros casos.
 function pareceLancada(p) {
   const cartao = ehCartaoOf(p);
+  if (cartao && anotadaPelaAlexa(p.valor, p.data_compra)) return 'alexa';
   return S.lancs.some((l) => l.import_key === p.import_key || (Math.abs(l.valor - p.valor) < 0.005 && (cartao
     ? !!l.cartao && l.data_compra === p.data_compra
     : !l.cartao && l.ano === p.ano && l.mes === p.mes && l.tipo === p.tipo)));
@@ -1567,7 +1581,7 @@ function ofRevisarForm() {
     const titulo = p.conta_id !== atual ? `<div class="imp-grupo">${ico(cartao ? 'cartoes' : 'banco', 14)}${esc(nomeConta(k))}</div>` : '';
     atual = p.conta_id;
     const marca = p.marcada && !dup[i];
-    const tags = [cartao ? `fatura de ${MES_CURTO[p.mes - 1].toLowerCase()}${p.ano !== new Date().getFullYear() ? ` ${p.ano}` : ''}` : '', p.aviso || '', dup[i] ? 'parece já lançada' : '']
+    const tags = [cartao ? `fatura de ${MES_CURTO[p.mes - 1].toLowerCase()}${p.ano !== new Date().getFullYear() ? ` ${p.ano}` : ''}` : '', p.aviso || '', dup[i] === 'alexa' ? 'anotada pela Alexa' : dup[i] ? 'parece já lançada' : '']
       .filter(Boolean).map((t) => `<span class="tag">${esc(t)}</span>`).join('');
     return `${titulo}<div class="imp-row ${marca ? '' : 'off'}"><input type="checkbox" name="inc" value="${i}" ${marca ? 'checked' : ''} aria-label="Incluir ${esc(p.descricao)}">
       <div class="li-main"><span class="li-t">${esc(p.descricao)}</span>

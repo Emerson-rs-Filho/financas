@@ -107,3 +107,37 @@ export function achar(lista, nome, campo = (x) => x) {
   const pals = alvo.split(' ').filter((p) => p.length >= 4);
   return lista.filter((x) => { const n = normalizar(campo(x)).split(' '); return pals.some((p) => n.includes(p)); });
 }
+
+// ---------- cartão dentro de uma frase ----------
+// "500 reais no cartão Nubank" → { cartao: 'Nubank', resto: '500 reais' }
+// "no cartão de crédito do Inter", "no crédito" (cartao: '' = crédito sem nome), "no nubank" (cartão conhecido).
+// cartao null: não falou de cartão.
+const NAO_E_NOME = /^(?:em|no|na|nos|nas|de|do|da|para|pra|com|e|que|hoje|ontem)$/;
+export function lerCartao(texto, conhecidos = []) {
+  const t = String(texto || '').replace(/\s+/g, ' ').trim();
+  const achado = (nome) => conhecidos.find((c) => normalizar(c) === normalizar(nome));
+  let m = /(?:^|\s)(?:(?:no|na|pelo|pela|com o|com)\s+)?cart[aã]o(?:\s+de\s+cr[eé]dito)?(?:\s+(?:do|da|de)\b)?(?:\s+([^\s.,!?;]+))?/i.exec(t);
+  if (m) {
+    const pal = m[1] && !NAO_E_NOME.test(normalizar(m[1])) && !/^\d/.test(m[1]) ? m[1] : null;
+    const fimMatch = pal ? m.index + m[0].length : m.index + m[0].length - (m[1] ? m[1].length : 0);
+    const resto = (t.slice(0, m.index) + ' ' + t.slice(fimMatch)).replace(/\s+/g, ' ').trim();
+    return { cartao: pal ? achado(pal) ?? capital(pal) : '', resto };
+  }
+  m = /(?:^|\s)(?:(?:no|na|pelo|pela)\s+)?cr[eé]dito\b/i.exec(t);
+  if (m) return { cartao: '', resto: (t.slice(0, m.index) + ' ' + t.slice(m.index + m[0].length)).replace(/\s+/g, ' ').trim() };
+  // nome de um cartão conhecido, palavra por palavra ("45 no nubank de padaria")
+  const pals = t.split(' ');
+  const norm = pals.map((p) => normalizar(p).replace(/[.,!?;:]+$/, ''));
+  for (const c of conhecidos) {
+    const alvo = normalizar(c).split(' ');
+    for (let i = 0; i + alvo.length <= norm.length; i++) {
+      if (!alvo.every((a, k) => norm[i + k] === a)) continue;
+      const ini = i > 0 && /^(?:no|na|pelo|pela)$/.test(norm[i - 1]) ? i - 1 : i;
+      return { cartao: c, resto: [...pals.slice(0, ini), ...pals.slice(i + alvo.length)].join(' ').trim() };
+    }
+  }
+  return { cartao: null, resto: t };
+}
+
+// Mês da fatura de uma compra no cartão feita hoje: o mês seguinte (igual ao Open Finance sem dados da fatura).
+export const mesDaFatura = (h) => (h.mes === 12 ? { ano: h.ano + 1, mes: 1 } : { ano: h.ano, mes: h.mes + 1 });

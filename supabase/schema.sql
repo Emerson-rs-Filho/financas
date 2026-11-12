@@ -396,6 +396,18 @@ end $$;
 --     body    := '{"acao": "sync-todos"}'::jsonb);
 -- $$);
 
+-- ---------- Alexa: nome de quem fala (perfil de voz) ----------
+-- A Alexa manda um código por pessoa (personId); a skill guarda o nome dito em "meu nome é…".
+-- Só a função "alexa" (chave de serviço) lê e grava.
+create table if not exists public.alexa_pessoas (
+  person_id  text primary key,
+  nome       text not null,
+  criado_em  timestamptz not null default now()
+);
+alter table public.alexa_pessoas enable row level security;  -- sem policy: o app não enxerga
+revoke all on public.alexa_pessoas from anon, authenticated;
+grant all on public.alexa_pessoas to service_role;
+
 -- ---------- Open Finance (MeuPluggy → função "openfinance") ----------
 -- Conexões da Pluggy (uma por "item"). Todos da casa veem o status; só a função grava.
 create table if not exists public.of_itens (

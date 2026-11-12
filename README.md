@@ -68,13 +68,23 @@ O `--no-verify-jwt` é necessário porque a própria função confere o login. S
 
 ## Passo 4 — Alexa: lista de compras, finanças e resumo do dia (skill particular)
 
-A Amazon desligou em julho de 2024 o acesso de outros apps à lista de compras nativa da Alexa. Por isso o Nossa Casa tem a **própria skill**, que só existe na sua conta (fica em modo de desenvolvimento, não vai para a loja e é grátis). Você fala com ela começando por "nossa casa":
+A Amazon desligou em julho de 2024 o acesso de outros apps à lista de compras nativa da Alexa. Por isso o Nossa Casa tem a **própria skill**, que só existe na sua conta (fica em modo de desenvolvimento, não vai para a loja e é grátis).
+
+**Conversando ("Alexa, abre nossa casa"):** ela responde "Olá, Erminho! O que deseja fazer?" e fica ouvindo. Por exemplo:
+
+> **Você:** adicionar gasto · **Alexa:** Quanto quer adicionar? · **Você:** 500 reais no cartão Nubank · **Alexa:** Em que foi? · **Você:** mercado · **Alexa:** Anotei 500 reais de mercado no cartão Nubank, na fatura de dezembro. Mais alguma coisa?
+
+Depois de cada pedido ela pergunta "Mais alguma coisa?", até você dizer "não" ou "tchau". Dá para pedir qualquer coisa da lista abaixo, sem o "nossa casa".
+
+- **Gasto no cartão:** diga "no cartão Nubank", "no cartão de crédito do Inter", "no crédito" ou só "no Nubank" (cartões que já aparecem nos lançamentos ou no Open Finance). Entra como compra do cartão, na fatura do mês seguinte. Quando a mesma compra chegar pelo Open Finance ou pela fatura em CSV, até 3 dias antes ou depois e com o mesmo valor, ela vem **desmarcada** com a etiqueta *anotada pela Alexa*, para não contar duas vezes.
+- **Nome pela voz:** a Alexa só sabe quem está falando com o **perfil de voz** de cada um (app Alexa → Mais → Configurações → Sua conta/perfil → Voz) e com a personalização ligada na skill (veja o passo 7 abaixo). Na primeira vez ela pergunta o nome; responda "meu nome é Erminho". Sem perfil de voz, ela diz só "Olá!".
+
+**Pedidos diretos**, começando por "nossa casa":
 
 - "Alexa, pergunte à nossa casa como está a casa hoje" (resumo do dia: agenda, contas vencidas ou vencendo hoje e amanhã, tarefas da casa, cardápio e quantos itens tem na lista; o que não estiver configurado fica de fora)
 - "Alexa, peça à nossa casa para adicionar leite e pão"
 - "Alexa, pergunte à nossa casa o que tem na lista"
 - "Alexa, diga à nossa casa que já comprei leite"
-- "Alexa, abre nossa casa" → "adiciona café"
 - "Alexa, pergunte à nossa casa quanto falta pagar" (contas do mês em Finanças)
 - "Alexa, diga à nossa casa que paguei a conta de luz" (marca como paga e cria a saída, igual ao botão *pagar*; sem valor dito, usa o previsto. Dá para dizer o valor: "paguei a internet, 99 e 90")
 - "Alexa, peça à nossa casa para anotar um gasto de 45 reais na padaria" (entra em Lançamentos no mês atual; a categoria vem do último gasto com o mesmo nome ou de palavras-chave como mercado, farmácia e gasolina)
@@ -100,10 +110,11 @@ A Amazon desligou em julho de 2024 o acesso de outros apps à lista de compras n
    ```
 5. Em **Endpoint**, escolha **HTTPS**. Em *Default Region*, cole `https://SEU-PROJETO.supabase.co/functions/v1/alexa` (a Project URL do `js/config.js` + `/functions/v1/alexa`). No certificado, escolha *"My development endpoint is a sub-domain of a domain that has a wildcard certificate from a certificate authority"*. Clique em **Save**.
 6. Na aba **Test**, troque *Off* por **Development** e escreva "abre nossa casa" para testar. Pronto: funciona em todos os Echo e no app Alexa da mesma conta.
+7. (Opcional, para ela chamar cada um pelo nome) Na página da skill, procure **Personalization** (*Skill personalization*, em **Build**, no menu da esquerda ou em **Tools**), ligue e clique em **Save**. Depois, cada pessoa cria o perfil de voz no app Alexa. A Amazon muda esse menu de lugar de vez em quando; se não achar, procure por "personalization" na ajuda do console.
 
 A função confere que cada pedido veio mesmo da Alexa (assinatura da Amazon) e da sua skill (Skill ID), e grava na lista com a chave de serviço, que fica só no servidor do Supabase.
 
-**Já tinha a skill?** Para ganhar as frases novas (resumo do dia, contas, gastos, orçamento, metas e reparos): cole de novo o `alexa/modelo-pt-BR.json` no **JSON Editor** (Save e Build skill) e publique a função outra vez com `npx supabase functions deploy alexa --no-verify-jwt`.
+**Já tinha a skill?** Para ganhar as frases novas (conversa com "O que deseja fazer?", gasto no cartão, nome pela voz, resumo do dia, contas, orçamento, metas e reparos): rode de novo o `supabase/schema.sql` (cria a tabela `alexa_pessoas`), cole de novo o `alexa/modelo-pt-BR.json` no **JSON Editor** (Save e Build skill) e publique a função outra vez com `npx supabase functions deploy alexa --no-verify-jwt`.
 
 **Dica:** no app Alexa, crie uma **Rotina** com uma frase curta (ex.: "acabou o café") que dispara "peça à nossa casa para adicionar café". Outra boa: uma rotina às 7h (ou com a frase "bom dia") que dispara "pergunte à nossa casa como está a casa hoje", e o Echo já fala o resumo do dia.
 

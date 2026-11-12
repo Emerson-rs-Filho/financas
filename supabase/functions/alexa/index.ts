@@ -1,4 +1,6 @@
 // Edge Function "alexa": atende a skill particular "Nossa Casa": lista de compras, finanças e reparos.
+//   "Alexa, abre nossa casa" → "Olá, Erminho! O que deseja fazer?" (hub: depois de cada pedido, "Mais alguma coisa?")
+//   → "adicionar gasto" → "Quanto quer adicionar?" → "500 reais no cartão Nubank" → "Em que foi?" → "mercado"
 //   "Alexa, peça à nossa casa para adicionar leite e pão"
 //   "Alexa, pergunte à nossa casa o que tem na lista"
 //   "Alexa, diga à nossa casa que já comprei leite"
@@ -20,6 +22,7 @@ import { capital, juntar } from './comum.js';
 import { anotarGasto, faltaPagar, orcamento, pagarConta } from './financas.js';
 import { guardarNaMeta, metaSituacao } from './metas.js';
 import { resumoDoDia } from './resumo.js';
+import { nomeDaPessoa, salvarNome } from './pessoas.js';
 
 const SKILL_ID = Deno.env.get('ALEXA_SKILL_ID') ?? '';
 // A chave service_role só existe aqui no servidor (o Supabase a injeta nas Edge Functions); nunca vai para o navegador.
@@ -69,9 +72,11 @@ async function verificar(req: Request, corpo: string, body: any) {
 }
 
 // ---------- respostas ----------
-const resposta = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json;charset=UTF-8' } });
-const fala = (texto: string, terminar = true, insistir?: string) => resposta({
+// As funções montam o corpo da resposta; a entrada aplica o hub (ver noHub) e só então vira Response.
+// deno-lint-ignore no-explicit-any
+type Corpo = any;
+const resposta = (body: Corpo): Corpo => body;
+const fala = (texto: string, terminar = true, insistir?: string): Corpo => resposta({
   version: '1.0',
   response: {
     outputSpeech: { type: 'PlainText', text: texto },
@@ -79,29 +84,37 @@ const fala = (texto: string, terminar = true, insistir?: string) => resposta({
     ...(insistir ? { reprompt: { outputSpeech: { type: 'PlainText', text: insistir } } } : {}),
   },
 });
-// Conversa aberta ("Alexa, abre nossa casa"): fala o texto e já fica esperando o próximo item ("leite").
 const INTENT_VAZIA = { name: 'AdicionarIntent', confirmationStatus: 'NONE', slots: { item: { name: 'item', confirmationStatus: 'NONE' } } };
-// Na abertura: encadeia na AdicionarIntent e a própria Alexa pergunta "O que eu adiciono?" (prompt do modelo).
-const abrirConversa = (texto: string) => resposta({
+// Despedida: encerra mesmo dentro do hub.
+const tchau = (): Corpo => ({ ...fala('Até mais!'), fim: true });
+
+// ---------- hub ("Alexa, abre nossa casa") ----------
+const MENU = 'Você pode adicionar um gasto, colocar algo na lista, pagar uma conta, perguntar do orçamento ou das metas, ou ouvir o resumo do dia.';
+const abrirHub = (nome: string | null, texto?: string): Corpo => ({
   version: '1.0',
-  sessionAttributes: { conversa: true },
+  sessionAttributes: { hub: true, nome },
   response: {
-    outputSpeech: { type: 'PlainText', text: texto },
+    outputSpeech: { type: 'PlainText', text: texto ?? `Olá${nome ? `, ${nome}` : ''}! O que deseja fazer?` },
+    reprompt: { outputSpeech: { type: 'PlainText', text: `${MENU} O que deseja fazer?` } },
     shouldEndSession: false,
-    directives: [{ type: 'Dialog.Delegate', updatedIntent: INTENT_VAZIA }],
   },
 });
-// Depois de adicionar: pede outro item. Aqui precisa ser ElicitSlot (o Delegate não aceita fala na mesma intenção).
-const continuar = (texto: string) => resposta({
-  version: '1.0',
-  sessionAttributes: { conversa: true },
-  response: {
-    outputSpeech: { type: 'PlainText', text: texto },
-    reprompt: { outputSpeech: { type: 'PlainText', text: 'Quer adicionar mais alguma coisa? Se não, diga não.' } },
-    shouldEndSession: false,
-    directives: [{ type: 'Dialog.ElicitSlot', slotToElicit: 'item', updatedIntent: INTENT_VAZIA }],
-  },
-});
+// Dentro do hub, nada encerra sozinho: a resposta ganha "Mais alguma coisa?" e a sessão continua.
+// Os atributos do hub (hub, nome) seguem junto com o que a resposta já guarda (ex.: o valor de um gasto pela metade).
+// deno-lint-ignore no-explicit-any
+function noHub(b: Corpo, sessao: any): Corpo {
+  const fim = !!b?.fim;
+  if (b) delete b.fim;
+  if (!sessao?.hub || !b?.response?.outputSpeech || fim) return b;
+  b.sessionAttributes = { ...(b.sessionAttributes ?? {}), hub: true, nome: b.sessionAttributes?.nome ?? sessao.nome ?? null };
+  const r = b.response;
+  if (r.shouldEndSession !== false) {
+    r.outputSpeech.text += ' Mais alguma coisa?';
+    r.shouldEndSession = false;
+    r.reprompt = { outputSpeech: { type: 'PlainText', text: 'Mais alguma coisa? Se não, é só dizer não.' } };
+  }
+  return b;
+}
 // Pergunta de novo dentro da mesma intenção: a resposta ("45 reais na padaria") volta no slot "item".
 const perguntar = (intent: string, texto: string, sessao: Record<string, unknown> = {}) => resposta({
   version: '1.0',
@@ -119,8 +132,10 @@ const responder = (intent: string, r: Saida) =>
   (typeof r === 'string' ? fala(r) : r.repetir ? perguntar(intent, r.texto, r.sessao) : fala(r.texto));
 
 const ENCERRAR = /^(nao|nada|so isso|e so isso|e so|pronto|acabou|obrigad[oa]|nao obrigad[oa]|tchau|chega|nada mais|mais nada)$/;
-// Com a skill aberta, tudo o que se fala chega como "item" da AdicionarIntent: estes começos levam ao pedido certo.
+// Frases que o modelo de voz pode jogar na AdicionarIntent ("adicionar {item}"): estes começos levam ao pedido certo.
 const PEDIDOS: [RegExp, string][] = [
+  [/^(?:um |uma |o )?(?:gasto|despesa)(?: de| no| na)?\b/, 'GastoIntent'], // "adicionar gasto", "adicionar um gasto de 50 reais"
+  [/^(?:um |o )?(?:reparo|conserto)\b/, 'AnotarReparoIntent'],
   [/^(?:quanto (?:ainda )?falta pagar|quais contas|que contas|tem conta|o que vence)\b/, 'ContasIntent'],
   [/^(?:o que tem na lista|o que tem para comprar|o que falta comprar|ler a lista|le a lista|leia a lista)\b/, 'LerListaIntent'],
   [/^anot[ae]r? (?:um |o )?(?:reparo|conserto)\b/, 'AnotarReparoIntent'],
@@ -144,18 +159,18 @@ async function todos(): Promise<Item[]> {
 }
 
 // ---------- intenções ----------
-async function adicionar(texto: string, conversa = false) {
-  if (conversa && ENCERRAR.test(normalizar(texto).replace(/[.!,]/g, ''))) return fala('Até mais!');
-  if (conversa) {
-    const dito = normalizar(texto).replace(/[.!?,]/g, '');
-    for (const [re, intent] of PEDIDOS) {
-      const m = re.exec(dito);
-      // tira do texto original as palavras do começo do pedido (mantém acentos do resto)
-      if (m) return executar(intent, texto.trim().split(/\s+/).slice(m[0].split(' ').length).join(' '), {});
-    }
+// deno-lint-ignore no-explicit-any
+async function adicionar(texto: string, sessao: any = {}) {
+  const dito = normalizar(texto).replace(/[.!?,]/g, '');
+  if (sessao.hub && ENCERRAR.test(dito)) return tchau();
+  // "adicionar gasto" ou, no hub, uma frase livre que o modelo de voz jogou aqui: leva ao pedido certo
+  for (const [re, intent] of PEDIDOS) {
+    const m = re.exec(dito);
+    // tira do texto original as palavras do começo do pedido (mantém acentos do resto)
+    if (m) return executar(intent, texto.trim().split(/\s+/).slice(m[0].split(' ').length).join(' '), sessao);
   }
   const novos = separarItens(texto);
-  if (!novos.length) return conversa ? continuar('Não entendi o item. O que eu adiciono?') : fala('Não entendi o item. O que eu adiciono?', false, 'Diga, por exemplo: adiciona leite.');
+  if (!novos.length) return fala('Não entendi o item. O que eu adiciono?', false, 'Diga, por exemplo: adiciona leite.');
   const lista = await todos();
   const criados: typeof novos = [], jaTinha: string[] = [];
   for (const n of novos) {
@@ -177,7 +192,7 @@ async function adicionar(texto: string, conversa = false) {
   const partes = [];
   if (criados.length) partes.push(`Pronto, coloquei ${juntar(criados.map(falado))} na lista.`);
   if (jaTinha.length) partes.push(`${capital(juntar(jaTinha))} já ${jaTinha.length > 1 ? 'estavam' : 'estava'} na lista.`);
-  return conversa ? continuar(`${partes.join(' ')} Mais alguma coisa?`) : fala(partes.join(' '));
+  return fala(partes.join(' '));
 }
 
 async function lerLista() {
@@ -221,9 +236,18 @@ async function anotarReparo(texto: string) {
 }
 
 // deno-lint-ignore no-explicit-any
-async function executar(nome: string, item: string, sessao: any): Promise<Response> {
+async function executar(nome: string, item: string, sessao: any, personId: string | null = null): Promise<Corpo> {
   switch (nome) {
-    case 'AdicionarIntent': return await adicionar(item, !!sessao.conversa);
+    case 'AdicionarIntent': return await adicionar(item, sessao);
+    case 'NomeIntent': {
+      const r = await salvarNome(db, personId, item);
+      return typeof r === 'object' && r.nome ? abrirHub(r.nome, r.texto) : responder(nome, r);
+    }
+    case 'AMAZON.YesIntent': return sessao.hub ? abrirHub(sessao.nome ?? null, 'O que deseja fazer?') : fala('Certo.');
+    case 'AMAZON.NoIntent': return tchau();
+    case 'AMAZON.FallbackIntent':
+      return sessao.hub ? fala(`Não entendi. ${MENU} O que deseja fazer?`, false, 'O que deseja fazer?')
+        : fala('Não entendi. Diga, por exemplo: adiciona leite.', false, AJUDA);
     case 'LerListaIntent': return await lerLista();
     case 'CompreiIntent': return await comprei(item);
     case 'ContasIntent': return fala(await faltaPagar(db));
@@ -234,8 +258,8 @@ async function executar(nome: string, item: string, sessao: any): Promise<Respon
     case 'GuardarMetaIntent': return responder(nome, await guardarNaMeta(db, item, sessao));
     case 'ResumoIntent': return fala(await resumoDoDia(db));
     case 'AnotarReparoIntent': return await anotarReparo(item);
-    case 'AMAZON.HelpIntent': return fala(AJUDA, false, 'O que eu coloco na lista?');
-    case 'AMAZON.StopIntent': case 'AMAZON.CancelIntent': case 'AMAZON.NavigateHomeIntent': return fala('Até mais!');
+    case 'AMAZON.HelpIntent': return fala(`${AJUDA} O que deseja fazer?`, false, 'O que deseja fazer?');
+    case 'AMAZON.StopIntent': case 'AMAZON.CancelIntent': case 'AMAZON.NavigateHomeIntent': return tchau();
     default: return fala('Não entendi. Diga, por exemplo: adiciona leite.', false, AJUDA);
   }
 }
@@ -253,13 +277,21 @@ Deno.serve(async (req) => {
   }
 
   const r = body.request ?? {};
+  const sessao = body.session?.attributes ?? {};
+  const personId: string | null = body.context?.System?.person?.personId ?? null;
+  const json = (b: Corpo) => new Response(JSON.stringify(b), { headers: { 'Content-Type': 'application/json;charset=UTF-8' } });
   try {
-    if (r.type === 'LaunchRequest') return abrirConversa('Oi!');
-    if (r.type === 'SessionEndedRequest') return resposta({ version: '1.0', response: {} });
-    if (r.type !== 'IntentRequest') return fala(AJUDA);
-    return await executar(r.intent?.name ?? '', r.intent?.slots?.item?.value ?? '', body.session?.attributes ?? {});
+    if (r.type === 'LaunchRequest') {
+      const nome = await nomeDaPessoa(db, personId);
+      // voz reconhecida, mas ainda sem nome: pergunta uma vez
+      if (personId && nome === null) return json(abrirHub(null,'Olá! Ainda não sei o seu nome. Diga: meu nome é, e o seu nome. Ou diga o que deseja fazer.'));
+      return json(abrirHub(nome ?? null));
+    }
+    if (r.type === 'SessionEndedRequest') return json({ version: '1.0', response: {} });
+    if (r.type !== 'IntentRequest') return json(fala(AJUDA));
+    return json(noHub(await executar(r.intent?.name ?? '', r.intent?.slots?.item?.value ?? '', sessao, personId), sessao));
   } catch (e) {
     console.error('alexa:', e);
-    return fala('Tive um problema para falar com o aplicativo. Tenta de novo daqui a pouco.');
+    return json(noHub(fala('Tive um problema para falar com o aplicativo. Tenta de novo daqui a pouco.'), sessao));
   }
 });

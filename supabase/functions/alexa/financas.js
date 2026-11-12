@@ -2,7 +2,7 @@
 // Cada função recebe o cliente do Supabase e devolve o texto falado (string) ou
 // { texto, repetir: true, sessao } quando precisa perguntar de novo.
 import { normalizar } from './itens.js';
-import { hojeBR, capital, juntar, reais, dinheiro, emDias, lerValor, limparNome, achar } from './comum.js';
+import { MESES, hojeBR, capital, juntar, reais, dinheiro, emDias, lerValor, limparNome, achar, lerCartao, mesDaFatura } from './comum.js';
 
 // ---------- contas do mês ----------
 // Todas as contas ativas que vencem neste mês, com a situação de cada uma.
@@ -117,17 +117,62 @@ async function tetos(db) {
 }
 
 // "45 reais na padaria". sessao.gastoValor: valor dito antes, quando a Alexa perguntou só onde foi.
+// Cartões que a casa já usa: os dos lançamentos e os apelidos dos cartões do Open Finance.
+async function cartoesConhecidos(db) {
+  const [l, o] = await Promise.all([
+    db.from('lancamentos').select('cartao').not('cartao', 'is', null).order('id', { ascending: false }).limit(2000),
+    db.from('of_contas').select('nome,apelido,tipo').eq('tipo', 'CREDIT'),
+  ]);
+  if (l.error) throw l.error;
+  const nomes = [...l.data.map((x) => x.cartao), ...(o.error ? [] : o.data.map((x) => x.apelido || x.nome))].filter(Boolean);
+  const vistos = new Map();
+  nomes.forEach((n) => { if (!vistos.has(normalizar(n))) vistos.set(normalizar(n), n); });
+  return [...vistos.values()];
+}
+
+// "45 reais na padaria", "500 reais no cartão Nubank". Quando falta algo, pergunta e guarda o que já foi dito na sessão:
+// gastoValor, gastoDesc, gastoCartao (nome do cartão) e gastoCredito (falou "crédito" mas há mais de um cartão).
 export async function anotarGasto(db, texto, sessao = {}, h = hojeBR()) {
-  const lido = lerValor(texto);
+  const cartoes = await cartoesConhecidos(db);
+  const lc = lerCartao(texto, cartoes);
+  const lido = lerValor(lc.resto);
   const valor = lido.valor ?? sessao.gastoValor ?? null;
-  const desc = limparNome(lido.resto, ['gasto', 'gastos', 'despesa', 'compra']);
-  if (!valor) return { texto: 'Quanto foi o gasto, e onde?', repetir: true };
-  if (!desc) return { texto: `Em que foi o gasto de ${dinheiro(valor)}?`, repetir: true, sessao: { gastoValor: valor } };
+  let desc = limparNome(lido.resto, ['gasto', 'gastos', 'despesa', 'compra']);
+  let cartao = lc.cartao ?? sessao.gastoCartao ?? null;
+  if (cartao == null && sessao.gastoCredito) {
+    // respondendo "Em qual cartão?": a resposta é o nome do cartão
+    const [k] = achar(cartoes, desc);
+    if (k) { cartao = k; desc = ''; }
+  }
+  desc = desc || sessao.gastoDesc || '';
+  if (cartao === '') {
+    if (cartoes.length === 1) cartao = cartoes[0];
+    else if (!cartoes.length) cartao = 'Cartão de crédito';
+    else return { texto: `Em qual cartão? ${juntar(cartoes).replace(/ e ([^ ]+)$/, ' ou $1')}?`, repetir: true, sessao: { gastoValor: valor, gastoDesc: desc, gastoCredito: true } };
+  }
+  const guardado = { gastoValor: valor, gastoDesc: desc, gastoCartao: cartao };
+  if (!valor) return { texto: 'Quanto quer adicionar?', repetir: true, sessao: guardado };
+  if (!desc) return { texto: 'Em que foi?', repetir: true, sessao: guardado };
+
   const [hist, orc] = await Promise.all([
-    db.from('lancamentos').select('descricao,categoria').eq('tipo', 'saida').order('id', { ascending: false }).limit(3000),
+    db.from('lancamentos').select('descricao,categoria,cartao').eq('tipo', 'saida').order('id', { ascending: false }).limit(3000),
     tetos(db),
   ]);
   if (hist.error) throw hist.error;
+  if (cartao) {
+    // Igual a uma compra importada do cartão: mês da fatura, data da compra e uma chave que marca que veio da Alexa
+    // (a tela Bancos e a importação do CSV usam isso para avisar quando a mesma compra chegar do banco).
+    const doCartao = hist.data.filter((l) => l.cartao);
+    let categoria = escolherCategoria(desc, [...doCartao, ...hist.data], orc);
+    if (normalizar(categoria) === 'outros') categoria = 'Outros (cartão)';
+    const f = mesDaFatura(h);
+    const ins = await db.from('lancamentos').insert({
+      ...f, tipo: 'saida', descricao: capital(desc), categoria, valor, cartao, data_compra: h.iso,
+      import_key: `alexa|${h.iso}|${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+    });
+    if (ins.error) throw ins.error;
+    return `Anotei ${dinheiro(valor)} de ${desc.toLowerCase()} no cartão ${cartao}, na fatura de ${MESES[f.mes - 1]}.`;
+  }
   const categoria = escolherCategoria(desc, hist.data, orc);
   const ins = await db.from('lancamentos').insert({ ano: h.ano, mes: h.mes, tipo: 'saida', descricao: capital(desc), categoria, valor });
   if (ins.error) throw ins.error;

@@ -24,6 +24,14 @@
           "samples": []
         },
         {
+          "name": "AMAZON.NoIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.YesIntent",
+          "samples": []
+        },
+        {
           "name": "AdicionarIntent",
           "slots": [
             {
@@ -205,7 +213,23 @@
             "que eu gastei {item}",
             "anotar um gasto",
             "anota um gasto",
-            "novo gasto"
+            "novo gasto",
+            "adicionar gasto",
+            "adicionar um gasto",
+            "adiciona um gasto",
+            "adiciona gasto",
+            "adicione um gasto",
+            "adicionar gasto de {item}",
+            "adicionar um gasto de {item}",
+            "adiciona um gasto de {item}",
+            "adicionar despesa",
+            "adicionar uma despesa",
+            "adicionar uma despesa de {item}",
+            "lançar gasto",
+            "lançar um gasto",
+            "um gasto",
+            "gasto",
+            "novo gasto de {item}"
           ]
         },
         {
@@ -365,6 +389,28 @@
             "o que tem de novo",
             "as novidades"
           ]
+        },
+        {
+          "name": "NomeIntent",
+          "slots": [
+            {
+              "name": "item",
+              "type": "AMAZON.SearchQuery",
+              "samples": [
+                "{item}"
+              ]
+            }
+          ],
+          "samples": [
+            "meu nome é {item}",
+            "o meu nome é {item}",
+            "me chamo {item}",
+            "eu me chamo {item}",
+            "pode me chamar de {item}",
+            "aqui é o {item}",
+            "aqui é a {item}",
+            "quem fala é {item}"
+          ]
         }
       ],
       "types": []
@@ -513,7 +559,7 @@
         "variations": [
           {
             "type": "PlainText",
-            "value": "Quanto foi o gasto, e onde?"
+            "value": "Quanto quer adicionar?"
           }
         ]
       },
