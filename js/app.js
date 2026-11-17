@@ -26,11 +26,13 @@ function irPara(r) {
 // ---------------- início ----------------
 async function boot() {
   C.user = await db.currentUser();
+  db.aoTerminarSessao(sessaoTerminou);
   if (!C.user) return renderLogin();
   render();
 }
 
-function renderLogin() {
+// aviso: texto mostrado acima do formulário (ex.: a sessão terminou)
+function renderLogin(aviso = '') {
   app.innerHTML = `
   <div class="login">
     <section class="login-art">
@@ -44,7 +46,7 @@ function renderLogin() {
         ${db.DEMO ? '<p class="muted" style="margin:0;font-size:13px;line-height:1.5">Modo demonstração: qualquer e-mail e senha funcionam. Configure o Supabase para ativar o login de verdade.</p>' : ''}
         <label class="field">E-mail<input type="email" name="email" autocomplete="username" required></label>
         <label class="field">Senha<input type="password" name="password" autocomplete="current-password" required></label>
-        <div class="error" id="login-err" role="alert"></div>
+        <div class="error" id="login-err" role="alert">${esc(aviso)}</div>
         <button class="btn lime" type="submit" style="min-height:52px;font-size:15px">Entrar</button>
       </form>
     </section>
@@ -212,12 +214,25 @@ function menuSheet() {
   modal.showModal();
 }
 
-async function sair() {
-  await db.signOut();
+function esquecerSessao() {
   C.user = null; C.mod = C.def = C.aba = null;
   carregados.clear();
+  if (modal.open) modal.close();
+}
+
+async function sair() {
+  esquecerSessao(); // antes do signOut, para o aviso de sessão terminada não disparar
+  await db.signOut();
   history.replaceState(null, '', '#inicio');
   renderLogin();
+}
+
+// Sessão terminada sem tocar em "sair": volta para o login com um aviso.
+// O endereço continua o mesmo, então depois de entrar a pessoa volta para onde estava.
+function sessaoTerminou() {
+  if (!C.user) return;
+  esquecerSessao();
+  renderLogin('Sua sessão terminou. Entre de novo para continuar.');
 }
 
 // Baixa uma planilha com todos os dados (cópia de segurança).
