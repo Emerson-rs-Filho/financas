@@ -5,17 +5,22 @@ import { seedLancamentos } from './seed.js';
 export const DEMO = !SUPABASE_URL || !SUPABASE_ANON_KEY;
 let sb = null;
 
-async function client() {
-  if (sb) return sb;
-  if (!window.supabase) {
-    await new Promise((ok, fail) => {
-      const s = document.createElement('script');
-      s.src = 'js/vendor/supabase.js';
-      s.onload = ok; s.onerror = () => fail(new Error('Não foi possível carregar o Supabase.'));
-      document.head.appendChild(s);
-    });
+// Guarda a promessa: duas chamadas ao mesmo tempo recebem o mesmo cliente (dois clientes disputariam a sessão).
+function client() {
+  if (!sb) {
+    sb = (async () => {
+      if (!window.supabase) {
+        await new Promise((ok, fail) => {
+          const s = document.createElement('script');
+          s.src = 'js/vendor/supabase.js';
+          s.onload = ok; s.onerror = () => fail(new Error('Não foi possível carregar o Supabase.'));
+          document.head.appendChild(s);
+        });
+      }
+      return window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    })();
+    sb.catch(() => { sb = null; }); // falhou (sem internet): tenta de novo na próxima chamada
   }
-  sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   return sb;
 }
 
@@ -56,6 +61,18 @@ export async function signOut() {
   if (DEMO) { demo.user = null; demoSave(); return; }
   const c = await client();
   await c.auth.signOut();
+}
+
+// Avisa quando a sessão termina sem a pessoa tocar em "sair": o login venceu e não renovou,
+// a senha foi trocada ou alguém saiu em outra aba. Devolve uma função para cancelar.
+export function aoTerminarSessao(cb) {
+  if (DEMO) return () => {};
+  let sub = null;
+  client().then((c) => {
+    // o setTimeout tira o cb de dentro do callback do supabase-js (chamar o cliente ali dentro pode travar)
+    ({ data: { subscription: sub } } = c.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_OUT') setTimeout(cb, 0); }));
+  }).catch(() => { /* sem o cliente não há sessão para acompanhar */ });
+  return () => { if (sub) sub.unsubscribe(); };
 }
 
 // ---------- lançamentos ----------
