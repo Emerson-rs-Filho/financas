@@ -471,3 +471,20 @@ create policy "casa_of_pendentes" on public.of_pendentes for all to authenticate
 --     headers := '{"Content-Type": "application/json", "x-cron-secret": "SEU_CRON_SECRET"}'::jsonb,
 --     body    := '{"acao": "sync-todos"}'::jsonb);
 -- $$);
+
+-- ---------- Tempo real nas outras áreas ----------
+-- Quando o outro celular, a Alexa ou o Open Finance mudam algo, Finanças, Metas, Tarefas,
+-- Documentos e Cardápio se atualizam sozinhos na tela de quem está com o app aberto.
+-- (Compras, Reparos e Calendário já estavam ligados lá em cima.) Pode rodar de novo sem problema.
+do $$
+declare t text;
+begin
+  foreach t in array array['lancamentos', 'investimentos', 'contas', 'contas_pagamentos', 'orcamentos',
+                           'of_itens', 'of_contas', 'of_pendentes', 'metas', 'metas_aportes',
+                           'rotinas', 'rotinas_feitas', 'documentos', 'cardapio'] loop
+    begin
+      execute format('alter publication supabase_realtime add table public.%I', t);
+    exception when duplicate_object then null;
+    end;
+  end loop;
+end $$;

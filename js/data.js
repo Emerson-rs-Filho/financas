@@ -329,6 +329,28 @@ export function resetDemo() {
   demoSave();
 }
 
+// ---------- mudanças feitas em outro lugar (outro celular, Alexa, Open Finance) ----------
+// Avisa quando alguma das tabelas muda. Uma gravação costuma mexer em várias linhas e tabelas
+// seguidas (pagar conta = lançamento + pagamento), então o aviso espera elas pararem.
+// Devolve uma função para cancelar.
+export function assinarTabelas(nome, tabelas, cb) {
+  let t = null;
+  const avisar = () => { clearTimeout(t); t = setTimeout(cb, 800); };
+  if (DEMO) {
+    // no modo demonstração, "outro lugar" é outra aba do mesmo navegador
+    const h = (ev) => { if (ev.key === LS) { demo = demoLoad(); avisar(); } };
+    window.addEventListener('storage', h);
+    return () => window.removeEventListener('storage', h);
+  }
+  let canal = null;
+  client().then((c) => {
+    canal = c.channel(`tabelas-${nome}`);
+    tabelas.forEach((table) => canal.on('postgres_changes', { event: '*', schema: 'public', table }, avisar));
+    canal.subscribe();
+  }).catch(() => { /* sem tempo real: o app ainda atualiza ao voltar para ele */ });
+  return () => { clearTimeout(t); if (canal) canal.unsubscribe(); };
+}
+
 // ---------- lista de compras ----------
 const demoCompras = () => {
   // relê do storage: no modo demonstração outra aba pode ter mudado a lista

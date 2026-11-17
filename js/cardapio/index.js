@@ -163,6 +163,10 @@ export default {
     await carregarTudo();
   },
 
+  // mudou no outro celular: recarrega sem sair da semana que está na tela
+  tabelas: ['cardapio'],
+  recarregar: () => carregarTudo(),
+
   render(aba, el, ctx) {
     C = ctx;
     if (!semana) semana = segunda(hojeISO());

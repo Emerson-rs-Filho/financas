@@ -199,6 +199,10 @@ export default {
     await carregarTudo();
   },
 
+  // mudou no outro celular: o núcleo recarrega e redesenha
+  tabelas: ['documentos'],
+  recarregar: () => carregarTudo(),
+
   render(aba, el, ctx) {
     C = ctx;
     el.style.maxWidth = '820px';

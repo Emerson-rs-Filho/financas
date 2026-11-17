@@ -82,10 +82,58 @@ async function render() {
     }
     if (vez !== geracao) return;
     carregados.add(def.id);
+    acompanhar(def, mod);
   }
   estrutura(def, mod);
   mod.render(C.aba, document.getElementById('view'), C);
 }
+
+// ---------------- manter em dia ----------------
+// Módulos com `tabelas` são atualizados quando os dados mudam em outro lugar (o outro celular, a Alexa,
+// o Open Finance) e quando a pessoa volta para o app. Quem está aberto recarrega e redesenha;
+// os outros só são marcados para recarregar na próxima visita.
+const acompanhados = new Set();
+const adiados = new Set(); // esperando o formulário fechar ou a pessoa sair do campo
+function acompanhar(def, mod) {
+  if (!mod.tabelas || acompanhados.has(def.id)) return;
+  acompanhados.add(def.id);
+  db.assinarTabelas(def.id, mod.tabelas, () => atualizar(def.id));
+}
+
+async function atualizar(id) {
+  if (!C.user || !carregados.has(id)) return; // ainda não abriu (ou já vai recarregar)
+  if (!C.def || C.def.id !== id) { carregados.delete(id); return; }
+  const mod = C.mod;
+  try { await (mod.recarregar ? mod.recarregar(C) : mod.carregar(C)); } catch (e) { return; } // sem internet: fica o que já está na tela
+  redesenhar(id);
+}
+
+// Não redesenha por cima de um formulário aberto, de um campo sendo digitado nem no meio de um toque
+// (trocar a tela entre o toque e o clique faria o clique se perder). Tenta de novo a cada 1,5 s.
+let ultimoToque = 0;
+['pointerdown', 'keydown'].forEach((t) => document.addEventListener(t, () => { ultimoToque = Date.now(); }, true));
+const campoEmUso = () => { const a = document.activeElement; return !!(a && a.closest('#view') && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)); };
+const ocupado = () => modal.open || campoEmUso() || Date.now() - ultimoToque < 1500;
+let tentarDeNovo = null;
+async function redesenhar(id) {
+  if (!C.def || C.def.id !== id) { adiados.delete(id); return; }
+  if (ocupado()) {
+    adiados.add(id);
+    clearTimeout(tentarDeNovo);
+    tentarDeNovo = setTimeout(() => { if (adiados.has(id)) redesenhar(id); }, 1500);
+    return;
+  }
+  adiados.delete(id);
+  const y = window.scrollY;
+  await render();
+  window.scrollTo(0, y);
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden || !C.user) return;
+  if (!C.def) { render(); return; } // tela inicial: avisos novos
+  acompanhados.forEach((id) => atualizar(id));
+});
 
 const demoBar = () => (db.DEMO ? '<div class="demo-bar">Modo demonstração: os dados ficam só neste navegador. <button data-action="reset-demo">Restaurar dados da planilha</button></div>' : '');
 const nomeUsuario = () => {
