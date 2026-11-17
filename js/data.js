@@ -158,6 +158,17 @@ const numeros = (rows) => rows.map((r) => {
   ['teto', 'valor_previsto', 'valor'].forEach((k) => { if (o[k] != null) o[k] = Number(o[k]); });
   return o;
 });
+// Operações que mexem em várias tabelas rodam numa função do banco (tudo ou nada; veja o schema.sql).
+async function rpc(nome, args) {
+  const c = await client();
+  const { data, error } = await c.rpc(nome, args);
+  if (error) {
+    throw new Error(error.code === 'PGRST202' || /could not find the function/i.test(error.message || '')
+      ? `Falta a função "${nome}" no banco. Rode de novo o arquivo supabase/schema.sql no SQL Editor do Supabase.` : error.message);
+  }
+  return data;
+}
+
 async function tabela(nome) {
   const c = await client();
   const { data, error } = await c.from(nome).select('*').order('id');
@@ -234,11 +245,7 @@ export async function pagarConta({ conta, ano, mes, valor, pago_em }) {
     demoSave();
     return;
   }
-  const c = await client();
-  const { data, error } = await c.from('lancamentos').insert(lanc).select('id').single();
-  if (error) throw error;
-  const { error: e2 } = await c.from('contas_pagamentos').insert({ conta_id: conta.id, ano: +ano, mes: +mes, pago_em, valor: +valor, lancamento_id: data.id });
-  if (e2) { await c.from('lancamentos').delete().eq('id', data.id); throw semTabela(e2, 'contas_pagamentos'); }
+  await rpc('pagar_conta', { p_conta_id: conta.id, p_ano: +ano, p_mes: +mes, p_valor: +valor, p_pago_em: pago_em || null });
 }
 
 // Desfaz o pagamento e apaga o lançamento que ele criou.
@@ -249,10 +256,7 @@ export async function desfazerPagamento(p) {
     demoSave();
     return;
   }
-  const c = await client();
-  const { error } = await c.from('contas_pagamentos').delete().eq('id', p.id);
-  if (error) throw error;
-  if (p.lancamento_id) await c.from('lancamentos').delete().eq('id', p.lancamento_id);
+  await rpc('desfazer_pagamento', { p_id: p.id });
 }
 
 // ---------- cotações (Edge Function "cotacoes") ----------
@@ -409,22 +413,8 @@ export async function fecharCompra(f) {
     demoSave();
     return;
   }
-  const c = await client();
-  let lancamento_id = null;
-  if (lanc) {
-    const { data, error } = await c.from('lancamentos').insert(lanc).select('id').single();
-    if (error) throw error;
-    lancamento_id = data.id;
-  }
-  const { error } = await c.from('compras_fechamentos').insert({ ...row, lancamento_id });
-  if (error) {
-    if (lancamento_id) await c.from('lancamentos').delete().eq('id', lancamento_id);
-    throw semTabela(error, 'compras_fechamentos');
-  }
-  if (ids.length) {
-    const { error: e2 } = await c.from('compras_itens').delete().in('id', ids);
-    if (e2) throw e2;
-  }
+  await rpc('fechar_compra', { p_data: row.data, p_mercado: row.mercado, p_valor: row.valor, p_forma: row.forma, p_itens: row.itens, p_ids: ids,
+    p_categoria: lanc ? lanc.categoria : null, p_descricao: lanc ? lanc.descricao : null });
 }
 
 // Apaga o registro da compra e o lançamento que ela criou em Finanças (se houver).
@@ -435,10 +425,7 @@ export async function excluirFechamento(f) {
     demoSave();
     return;
   }
-  const c = await client();
-  const { error } = await c.from('compras_fechamentos').delete().eq('id', f.id);
-  if (error) throw error;
-  if (f.lancamento_id) await c.from('lancamentos').delete().eq('id', f.lancamento_id);
+  await rpc('excluir_fechamento', { p_id: f.id });
 }
 
 // Avisa quando a lista muda em outro lugar (outro celular, Alexa). Devolve uma função para cancelar.
@@ -690,11 +677,7 @@ export async function fazerRotina(r, { feito_em, feito_por, proxima }) {
     demoSave();
     return;
   }
-  const c = await client();
-  const { error } = await c.from('rotinas_feitas').insert(feita);
-  if (error) throw semTabela(error, 'rotinas_feitas');
-  const { error: e2 } = await c.from('rotinas').update({ proxima }).eq('id', r.id);
-  if (e2) throw e2;
+  await rpc('fazer_rotina', { p_rotina_id: r.id, p_feito_em: feito_em, p_feito_por: feita.feito_por, p_proxima: proxima });
 }
 
 // Desfaz a última vez: apaga o registro e devolve a data que estava antes.
@@ -706,10 +689,7 @@ export async function desfazerRotina(feita) {
     demoSave();
     return;
   }
-  const c = await client();
-  const { error } = await c.from('rotinas_feitas').delete().eq('id', feita.id);
-  if (error) throw error;
-  if (feita.proxima_anterior) await c.from('rotinas').update({ proxima: feita.proxima_anterior }).eq('id', feita.rotina_id);
+  await rpc('desfazer_rotina', { p_id: feita.id });
 }
 
 // ---------- cardápio da semana ----------
