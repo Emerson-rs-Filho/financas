@@ -1688,6 +1688,12 @@ export default {
     sincronizarSeAntigo();
   },
 
+  // mudou em outro lugar (o outro celular, a Alexa, o Open Finance): o núcleo chama recarregar e redesenha
+  tabelas: ['lancamentos', 'investimentos', 'contas', 'contas_pagamentos', 'orcamentos', 'of_itens', 'of_contas', 'of_pendentes'],
+  async recarregar() {
+    [S.lancs, S.invs] = await Promise.all([db.listLancamentos(), db.listInvestimentos(), carregarContasOrc(), carregarOf()]);
+  },
+
   render(aba, el, ctx) {
     C = ctx;
     S.charts.forEach((c) => c.destroy());

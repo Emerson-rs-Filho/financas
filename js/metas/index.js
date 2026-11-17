@@ -207,6 +207,10 @@ export default {
     await carregarTudo();
   },
 
+  // mudou no outro celular ou pela Alexa ("guardei 200 na viagem"): o núcleo recarrega e redesenha
+  tabelas: ['metas', 'metas_aportes', 'investimentos'],
+  recarregar: () => carregarTudo(),
+
   render(aba, el, ctx) {
     C = ctx;
     el.innerHTML = `

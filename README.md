@@ -177,6 +177,10 @@ Uma pessoa não pode ligar o app direto nas APIs do Open Finance, porque elas s�
 
 Depois de entrar, escolha a área na tela inicial. Para trocar de área: no computador, use os ícones no topo do menu lateral (ou clique em *nossa casa.*); no celular, toque no nome da área no topo ou abra o menu ☰ → *áreas da casa*. Links antigos como `#lancamentos` continuam funcionando e abrem `#financas/lancamentos`.
 
+Todas as áreas se atualizam sozinhas quando algo muda em outro lugar (o outro celular, a Alexa, o Open Finance) e quando você volta para o app. Se houver um formulário aberto ou um campo sendo digitado, a tela espera você terminar.
+
+> **Já usa o app?** Rode de novo o `supabase/schema.sql` para ligar o tempo real em Finanças, Metas, Tarefas, Documentos e Cardápio. Sem isso, essas áreas só se atualizam quando você volta para o app.
+
 ### Finanças
 
 - **Resumo:** saldo do ano, gráfico de entradas e saídas, para onde foi o dinheiro e as principais dicas.
@@ -330,6 +334,8 @@ supabase/seed_2026.sql dados iniciais
      acao(nome, botao, ctx) { /* cliques em [data-action] */ },
      mudou(ev, ctx) {},                              // opcional: eventos change
      topo(ctx, id) { return ''; },                   // opcional: controles extras no menu (ex.: ano)
+     tabelas: ['minha_tabela'],                      // opcional: o núcleo redesenha quando elas mudam em outro lugar
+     async recarregar(ctx) { /* opcional: busca de novo sem perder o estado da tela (padrão: carregar) */ },
    };
    ```
 2. Em `js/modulos.js`, troque o status da área para `'ativo'` e aponte o `load()` para o arquivo.

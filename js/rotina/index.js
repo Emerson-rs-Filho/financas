@@ -192,6 +192,10 @@ export default {
     await carregarTudo();
   },
 
+  // mudou no outro celular: o núcleo recarrega e redesenha
+  tabelas: ['rotinas', 'rotinas_feitas'],
+  recarregar: () => carregarTudo(),
+
   render(aba, el, ctx) {
     C = ctx;
     el.style.maxWidth = '820px';
