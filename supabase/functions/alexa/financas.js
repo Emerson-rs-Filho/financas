@@ -62,12 +62,9 @@ export async function pagarConta(db, texto, sessao = {}, h = hojeBR()) {
 
   const v = valor || alvo.valor;
   if (!v) return { texto: `Quanto foi a conta de ${alvo.nome}?`, repetir: true, sessao: { contaId: alvo.conta.id } };
-  // Igual ao app: cria a saída em Finanças e registra o pagamento ligado a ela.
-  const lanc = { ano: h.ano, mes: h.mes, tipo: 'saida', descricao: alvo.conta.descricao, categoria: alvo.conta.categoria, valor: v };
-  const { data, error } = await db.from('lancamentos').insert(lanc).select('id').single();
+  // Igual ao app: cria a saída em Finanças e registra o pagamento ligado a ela, numa transação só (função do schema.sql).
+  const { error } = await db.rpc('pagar_conta', { p_conta_id: alvo.conta.id, p_ano: h.ano, p_mes: h.mes, p_valor: v, p_pago_em: h.iso });
   if (error) throw error;
-  const pg = await db.from('contas_pagamentos').insert({ conta_id: alvo.conta.id, ano: h.ano, mes: h.mes, pago_em: h.iso, valor: v, lancamento_id: data.id });
-  if (pg.error) { await db.from('lancamentos').delete().eq('id', data.id); throw pg.error; }
   const faltam = abertas.length - 1;
   return `Pronto, marquei a conta de ${alvo.nome} como paga, ${dinheiro(v)}. ${faltam ? `Ainda ${faltam === 1 ? 'falta uma conta' : `faltam ${faltam} contas`} neste mês.` : 'Com essa, todas as contas do mês estão pagas.'}`;
 }
