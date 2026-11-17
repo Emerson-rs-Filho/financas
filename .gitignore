@@ -1,0 +1,15 @@
+# Arquivos locais da CLI do Supabase (projeto ligado, endereço do banco, versões). Não vão para o GitHub.
+supabase/.temp/
+supabase/.branches/
+
+# Dados reais e segredos: nunca no repositório (ele é público)
+*NAO_SUBIR*
+.env
+.env.*
+
+# Sistema e editores
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+node_modules/
